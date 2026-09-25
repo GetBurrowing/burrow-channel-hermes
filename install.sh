@@ -59,6 +59,9 @@ usage: install.sh --url wss://<host>/runtime/ws --runtime-id <id> [options]
   --copy-fallback      if `hermes plugins install` refuses the source, copy the
                        committed tree into $HERMES_HOME/plugins/ instead (this
                        skips Hermes's install-time scan and provenance record)
+  --refuse-scan-caution  fail when Hermes's install-time scan returns CAUTION
+                       (default: accept CAUTION with --force; DANGEROUS is
+                       always refused, by Hermes itself)
   --plugin-only        install/refresh the plugin files only; leave .env and the
                        MCP entry alone (used by update.sh)
 
@@ -80,6 +83,7 @@ REPO_URL="$DEFAULT_REPO"
 REF_ARG=""
 COPY_FALLBACK=0
 PLUGIN_ONLY=0
+REFUSE_CAUTION=0
 
 refuse_token_arg() {
   die "--token is refused: a token on the command line is visible to every local user through ps and /proc/<pid>/cmdline. Pipe it on stdin (printf '%s' \"\$TOKEN\" | install.sh ...) or pass --token-file PATH (a file only you can read)."
@@ -112,6 +116,7 @@ parse_args() {
       --ref=*) REF_ARG="${1#*=}"; shift ;;
       --copy-fallback) COPY_FALLBACK=1; shift ;;
       --plugin-only) PLUGIN_ONLY=1; shift ;;
+      --refuse-scan-caution) REFUSE_CAUTION=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) usage; die "unknown argument: $1" ;;
     esac
@@ -226,7 +231,8 @@ write_env() {
 run_hermes() {
   # stdin is /dev/null for every Hermes child: none of them may read (or be
   # handed) the token, and a non-interactive Hermes never blocks on a prompt.
-  "$HERMES_BIN" "$@" </dev/null
+  # COLUMNS keeps Hermes's rich output from wrapping the scan verdict line.
+  COLUMNS=200 "$HERMES_BIN" "$@" </dev/null
 }
 
 plugin_dir() { printf '%s/plugins/%s' "$HERMES_HOME" "$PLUGIN_NAME"; }
@@ -310,6 +316,41 @@ copy_fallback() {
   mv "$tmp" "$target"
 }
 
+LAST_INSTALL_OUT=""
+
+# One `hermes plugins install`, its output passed through to stderr and kept
+# for try_install to read.
+hermes_install() {
+  local src="$1" rc=0
+  shift
+  LAST_INSTALL_OUT="$(run_hermes plugins install "$src" --ref "$SRC_SHA" --no-enable "$@" 2>&1)" || rc=$?
+  printf '%s\n' "$LAST_INSTALL_OUT" >&2
+  return "$rc"
+}
+
+# Hermes scans every plugin tree at install time: CAUTION asks for
+# confirmation (a non-interactive install is refused), DANGEROUS is refused
+# even with --force (tools/plugin_guard.py). This repository's tree scans
+# CAUTION because its README documents the curl|bash install of this very
+# plugin, so a CAUTION verdict is accepted with --force, loudly, unless
+# --refuse-scan-caution. A DANGEROUS verdict is never retried.
+try_install() {
+  local src="$1"
+  shift
+  hermes_install "$src" "$@" && return 0
+  case "$LAST_INSTALL_OUT" in
+    *"Verdict: DANGEROUS"* | *"Verdict: dangerous"*) return 1 ;;
+    *"Verdict: CAUTION"* | *"Verdict: caution"*) ;;
+    *) return 1 ;;
+  esac
+  if [ "$REFUSE_CAUTION" = 1 ]; then
+    log "Hermes's install scan returned CAUTION and --refuse-scan-caution is set"
+    return 1
+  fi
+  log "Hermes's install scan returned CAUTION for $SRC_SHA (findings above). Accepting it with --force; pass --refuse-scan-caution to stop here instead."
+  hermes_install "$src" --force
+}
+
 install_plugin() {
   local current
   current="$(stamped_build)"
@@ -319,9 +360,9 @@ install_plugin() {
     local force=()
     [ ! -e "$(plugin_dir)" ] || force=(--force)
     log "installing plugin $PLUGIN_NAME at $SRC_SHA"
-    if ! run_hermes plugins install "$SRC_URL" --ref "$SRC_SHA" --no-enable ${force[@]+"${force[@]}"} >&2; then
+    if ! try_install "$SRC_URL" ${force[@]+"${force[@]}"}; then
       if [ "$SRC_URL" != "file://$SRC_DIR" ] &&
-        run_hermes plugins install "file://$SRC_DIR" --ref "$SRC_SHA" --no-enable ${force[@]+"${force[@]}"} >&2; then
+        try_install "file://$SRC_DIR" ${force[@]+"${force[@]}"}; then
         log "installed from the local clone (Hermes could not fetch $SRC_URL itself)"
       elif [ "$COPY_FALLBACK" = 1 ]; then
         log "hermes plugins install refused the source; copying into $HERMES_HOME/plugins/ (--copy-fallback)"

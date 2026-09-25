@@ -377,6 +377,39 @@ def test_copy_fallback_is_opt_in(checkout, home, env, token):
     assert not (home / "plugins" / "startup-suite-platform").exists()
 
 
+# --------------------------------------------------------------------- scan
+
+
+def _install_calls(env):
+    return [c for c in stub_calls(env) if c[:2] == ["plugins", "install"]]
+
+
+def test_caution_scan_is_accepted_with_force_and_said_so(checkout, home, env, token):
+    env = {**env, "HERMES_STUB_SCAN": "caution"}
+    proc = install(checkout, home, env, token)
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == INSTALLED
+    assert "returned CAUTION" in proc.stderr and "--refuse-scan-caution" in proc.stderr
+    calls = _install_calls(env)
+    assert ["--force" in c for c in calls] == [False, True]
+
+
+def test_caution_scan_refused_on_request(checkout, home, env, token):
+    env = {**env, "HERMES_STUB_SCAN": "caution"}
+    proc = install(checkout, home, env, token, "--refuse-scan-caution")
+    assert proc.returncode != 0
+    assert not any("--force" in c for c in _install_calls(env))
+    assert not (home / "plugins" / "startup-suite-platform").exists()
+
+
+def test_dangerous_scan_is_never_forced(checkout, home, env, token):
+    env = {**env, "HERMES_STUB_SCAN": "dangerous"}
+    proc = install(checkout, home, env, token)
+    assert proc.returncode != 0
+    calls = _install_calls(env)
+    assert calls and not any("--force" in c for c in calls)
+
+
 # ------------------------------------------------------------------- update
 
 

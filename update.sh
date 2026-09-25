@@ -35,9 +35,9 @@ while [ "$#" -gt 0 ]; do
     --repo) [ -n "${2:-}" ] || die "--repo needs a value"; REPO_URL="$2"; PASS+=(--repo "$2"); shift 2 ;;
     --hermes | --ref) [ -n "${2:-}" ] || die "$1 needs a value"; PASS+=("$1" "$2"); shift 2 ;;
     --hermes=* | --ref=* | --repo=*) PASS+=("$1"); [[ "$1" != --repo=* ]] || REPO_URL="${1#*=}"; shift ;;
-    --copy-fallback) PASS+=("$1"); shift ;;
+    --copy-fallback | --refuse-scan-caution) PASS+=("$1"); shift ;;
     -h | --help)
-      echo "usage: update.sh [--hermes-home DIR] [--hermes BIN] [--ref SHA] [--repo URL] [--copy-fallback]" >&2
+      echo "usage: update.sh [--hermes-home DIR] [--hermes BIN] [--ref SHA] [--repo URL] [--copy-fallback] [--refuse-scan-caution]" >&2
       exit 0
       ;;
     *) die "unknown argument: $1" ;;

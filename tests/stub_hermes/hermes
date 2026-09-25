@@ -18,6 +18,9 @@ config.yaml; this stub removes its lines completely. The README records what
 the real CLI leaves.
 
 HERMES_STUB_FAIL_INSTALL=1 makes `plugins install` fail (the copy-fallback test).
+HERMES_STUB_SCAN=caution|dangerous makes `plugins install` print the real CLI's
+scan verdict line and refuse, as the real CLI does non-interactively; --force
+overrides caution, never dangerous (tools/plugin_guard.py).
 """
 
 import json
@@ -92,6 +95,11 @@ def plugins(args: list[str]) -> None:
         ref = rest[rest.index("--ref") + 1] if "--ref" in rest else "HEAD"
         if os.environ.get("HERMES_STUB_FAIL_INSTALL") == "1":
             fail("Error: stub told to refuse this install")
+        scan = os.environ.get("HERMES_STUB_SCAN")
+        if scan == "dangerous":
+            fail("Scan: plugin (stub)  Verdict: DANGEROUS\nBlocked (dangerous verdict).")
+        if scan == "caution" and "--force" not in rest:
+            fail("Scan: plugin (stub)  Verdict: CAUTION\nBlocked. Use --force to override.")
         if not src.startswith("file://"):
             fail(f"Error: stub cannot fetch {src}")
         repo = src[len("file://") :]

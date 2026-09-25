@@ -75,6 +75,15 @@ Two install details that were measured, not assumed (hermes-agent fdec926e):
   refusal by Hermes's install-time security scan, and a copied plugin has no
   Hermes install record.
 
+- **Install-time scan.** Hermes scans the plugin tree before installing it
+  (tools/plugin_guard.py): `safe` installs, `caution` asks for confirmation
+  and is refused non-interactively, `dangerous` is refused even with
+  `--force`. This tree scans `caution`: the HIGH findings are this README's own
+  `curl | bash` install lines (measured on 37cafc2: 3 HIGH, 22 MEDIUM, 0
+  CRITICAL). install.sh therefore retries a `caution` refusal once with
+  `--force` and says so on stderr; `--refuse-scan-caution` makes it stop
+  instead. It never retries a `dangerous` verdict.
+
 Every run is idempotent: a second run with the same arguments changes no file
 (the plugin at the same sha is not reinstalled, and `config set` is skipped
 when the value already matches). The last line printed on success is exactly
