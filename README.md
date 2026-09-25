@@ -17,7 +17,10 @@ The repository root IS the Hermes plugin directory: `plugin.yaml`
 ## Install
 
 Prerequisite: Hermes Agent is installed and `hermes` is on PATH (or pass
-`--hermes BIN`). In Suite, register a federated runtime for the agent and
+`--hermes BIN`), and Hermes's runtime environment has the `mcp` Python
+package (the `mcp` extra). Without it Hermes parks the Suite MCP server with
+"requires HTTP transport but mcp.client.streamable_http is not available"
+(measured; the socket channel still works, the Suite tools do not). In Suite, register a federated runtime for the agent and
 generate its token (the token is shown once).
 
 ```sh
@@ -91,6 +94,11 @@ when the value already matches). The last line printed on success is exactly
 `hermes-suite-channel: uninstalled` and `hermes-suite-channel: updated`. The
 Suite desktop app keys on those lines.
 
+Set `SUITE_HOME_CHANNEL` (a Suite space id) if you want cron output
+delivered somewhere specific. Without it Hermes posts its own "No home channel
+is set" notice into the first Suite space it answers in (seen in the live
+proof); that text comes from Hermes, not from this plugin.
+
 ### Uninstall
 
 ```sh
@@ -103,10 +111,13 @@ deleted), and the `.env` lines defining the five `SUITE_*` keys above. Other
 `.env` lines are kept byte for byte. Two things a round trip does not give
 back: a missing final newline on `.env` (install.sh terminates the last line
 before appending, as Hermes's writer does), and what Hermes itself writes to
-`config.yaml` when a plugin is enabled and removed. With real Hermes
-(fdec926e) removing the plugin leaves `plugins: {enabled: [], disabled: []}`
-and a `_config_version` stamp in a `config.yaml` that had neither; nothing
-this plugin added survives. The tests' stub `hermes` removes its lines
+`config.yaml` when a plugin is enabled and removed. Measured with real Hermes
+(fdec926e) on a home whose `config.yaml` held only a `model:` block: after
+install, a gateway run and uninstall, `.env` and every other pre-existing file
+were byte-identical, and `config.yaml` had gained `plugins: {enabled: [],
+disabled: []}` and `_config_version: 46` (Hermes's plugin enable/remove) and
+`onboarding.seen.profile_build_offered: true` (the gateway run). Nothing this
+plugin added survived. The tests' stub `hermes` removes its lines
 completely, so the byte-identical round-trip test covers install.sh's own
 edits and the pairing of every Hermes call with its undo, not Hermes's
 serialiser.
