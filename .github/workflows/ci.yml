@@ -1,0 +1,38 @@
+# Advisory CI.
+#
+# This repository has no branch protection and no required status checks. A
+# red run here therefore REPORTS a failure; it does not block a merge. Turning
+# these checks into a merge gate is a repository-settings change that needs
+# admin rights and has to be done by a human in GitHub's UI. Until that
+# happens, do not describe anything merged into this repo as "CI-gated".
+#
+# Deliberately absent: path filters, `continue-on-error`, and step-level `if:`.
+# Each of those can turn this job green while running nothing, which is the
+# exact failure mode the tests below exist to catch.
+#
+# Mirrors claude-code-suite-channel/.github/workflows/ci.yml. The self-hosted
+# runner has no setup-python support (bootc host), so this uses the host
+# python3 and a job-local venv.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ruff + pytest
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m venv .venv
+      - run: .venv/bin/pip install -e '.[dev]'
+      - run: .venv/bin/ruff check .
+      - run: .venv/bin/ruff format --check .
+      - run: .venv/bin/pytest -v
