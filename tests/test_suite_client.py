@@ -70,6 +70,30 @@ async def test_reply_resolves_on_ok(server):
         await client.stop()
 
 
+async def test_reply_extras_are_merged_and_none_values_dropped(server):
+    server.replies["reply"] = ("ok", {"message_id": "msg-1"})
+    client = await started(server)
+    try:
+        await client.send_reply("sp-1", "hi", {"in_reply_to_message_id": "m-9", "context": None})
+        await client.send_reply("sp-1", "hi", None)
+        with_extras, without = (f[4] for _, f in server.events("reply"))
+        assert with_extras == {"space_id": "sp-1", "content": "hi", "in_reply_to_message_id": "m-9"}
+        assert without == {"space_id": "sp-1", "content": "hi"}
+    finally:
+        await client.stop()
+
+
+async def test_reply_extras_cannot_replace_space_id_or_content(server):
+    server.replies["reply"] = ("ok", {"message_id": "msg-1"})
+    client = await started(server)
+    try:
+        await client.send_reply("sp-1", "hi", {"space_id": "sp-evil", "content": "forged"})
+        ((_, frame),) = server.events("reply")
+        assert frame[4] == {"space_id": "sp-1", "content": "hi"}
+    finally:
+        await client.stop()
+
+
 @pytest.mark.parametrize("recoverable", [True, False])
 async def test_reply_raises_on_error_carrying_recoverable(server, recoverable):
     server.replies["reply"] = ("error", {"error": "not a participant", "recoverable": recoverable})
