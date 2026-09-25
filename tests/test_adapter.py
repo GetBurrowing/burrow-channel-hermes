@@ -462,6 +462,60 @@ async def test_failed_finalize_leaves_the_stream_open(live, server):
     assert all(not f[4]["done"] for _, f in server.events("reply_chunk"))
 
 
+# ── in_reply_to_message_id (task 01a0d8de) ────────────────────────────────
+
+SUITE_MSG = "01a0d8de-aaaa-7001-9246-3f8fe86630f6"
+
+
+async def test_send_with_a_suite_reply_to_forwards_in_reply_to(live, server):
+    server.replies["reply"] = ("ok", {"message_id": "msg-9", "space_id": "sp-1"})
+    assert (await live.send("sp-1", "hi", reply_to=SUITE_MSG)).success
+    ((_, frame),) = server.events("reply")
+    assert frame[4] == {"space_id": "sp-1", "content": "hi", "in_reply_to_message_id": SUITE_MSG}
+
+
+@pytest.mark.parametrize("reply_to", [None, "", "m-1", "chunk:" + SUITE_MSG, SUITE_MSG + "x", 7])
+async def test_non_suite_reply_to_is_not_forwarded(live, server, reply_to):
+    # The positive control for the case above: a send that always wrote the key
+    # (or wrote whatever reply_to held) fails here.
+    assert (await live.send("sp-1", "hi", reply_to=reply_to)).success
+    ((_, frame),) = server.events("reply")
+    assert frame[4] == {"space_id": "sp-1", "content": "hi"}
+
+
+async def test_stream_finalise_reply_carries_the_reply_to_from_the_opening_send(live, server):
+    opened = await live.send("sp-1", "draft", reply_to=SUITE_MSG, metadata={"expect_edits": True})
+    assert (await live.edit_message("sp-1", opened.message_id, "more")).success
+    assert (await live.edit_message("sp-1", opened.message_id, "final", finalize=True)).success
+    await server.wait_for(lambda: any(f[4]["done"] for _, f in server.events("reply_chunk")))
+    ((_, reply),) = server.events("reply")
+    assert reply[4] == {"space_id": "sp-1", "content": "final", "in_reply_to_message_id": SUITE_MSG}
+    # The ephemeral chunk pushes are unchanged: no annotation.
+    for _, f in server.events("reply_chunk"):
+        assert "in_reply_to_message_id" not in f[4]
+
+
+async def test_real_stream_consumer_anchors_the_persisted_reply(live, server):
+    """Hermes's own GatewayStreamConsumer, given the inbound message id as its
+    reply anchor, ends in one persisted reply that carries it."""
+    consumer = GatewayStreamConsumer(
+        live,
+        "sp-1",
+        StreamConsumerConfig(edit_interval=0.01, buffer_threshold=1),
+        initial_reply_to_id=SUITE_MSG,
+    )
+    task = asyncio.create_task(consumer.run())
+    for piece in ["Hello there, ", "this answer ", "is streamed."]:
+        consumer.on_delta(piece)
+        await asyncio.sleep(0.05)
+    final = "Hello there, this answer is streamed."
+    consumer.finish(final)
+    await asyncio.wait_for(task, 5)
+    await server.wait_for(lambda: any(f[4]["done"] for _, f in server.events("reply_chunk")))
+    replies = [f[4] for _, f in server.events("reply")]
+    assert replies == [{"space_id": "sp-1", "content": final, "in_reply_to_message_id": SUITE_MSG}]
+
+
 # ── token hygiene at the adapter boundary ─────────────────────────────────
 
 

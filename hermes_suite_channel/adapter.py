@@ -44,6 +44,7 @@ import datetime
 import logging
 import mimetypes
 import os
+import re
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -163,6 +164,26 @@ class _Stream:
     text: str = ""
     finalized: bool = False
     persisted_id: str | None = None
+    # Carried from ``send`` to the finalising ``reply``: ``edit_message`` is
+    # not given ``reply_to``.
+    reply_extras: dict[str, str] | None = None
+
+
+# A Suite message id is a canonical UUID. Hermes passes ``reply_to`` from the
+# inbound event's ``message_id``, but it can also carry this adapter's own
+# ``chunk:<id>`` handles or another platform's ids, which are never forwarded.
+_SUITE_MESSAGE_ID = re.compile(
+    r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
+
+
+def _reply_extras(reply_to: Any) -> dict[str, str] | None:
+    """``reply_to`` -> the ``reply`` push's ``in_reply_to_message_id`` (task
+    01a0d8de), only when it is shaped like a Suite message id. Core still checks
+    that the message exists and is in the reply's space."""
+    if isinstance(reply_to, str) and _SUITE_MESSAGE_ID.match(reply_to):
+        return {"in_reply_to_message_id": reply_to}
+    return None
 
 
 def fits_attachment_cap(raw_size: int) -> bool:
@@ -384,9 +405,11 @@ class SuiteAdapter(BasePlatformAdapter):
             )
         return None
 
-    async def _reply(self, chat_id: str, content: str) -> SendResult:
+    async def _reply(
+        self, chat_id: str, content: str, extras: dict[str, str] | None = None
+    ) -> SendResult:
         try:
-            response = await self.client.send_reply(chat_id, content)
+            response = await self.client.send_reply(chat_id, content, extras)
         except SuiteError as exc:
             return _send_error(exc)
         message_id = response.get("message_id")
@@ -397,13 +420,18 @@ class SuiteAdapter(BasePlatformAdapter):
         if (problem := self._usable(chat_id)) is not None:
             return problem
         if (metadata or {}).get("expect_edits"):
-            stream = _Stream(chat_id=chat_id, chunk_id=str(uuid.uuid4()), text=content)
+            stream = _Stream(
+                chat_id=chat_id,
+                chunk_id=str(uuid.uuid4()),
+                text=content,
+                reply_extras=_reply_extras(reply_to),
+            )
             self._streams[CHUNK_PREFIX + stream.chunk_id] = stream
             while len(self._streams) > STREAM_CAPACITY:
                 self._streams.popitem(last=False)
             self.client.send_reply_chunk(chat_id, stream.chunk_id, content, False)
             return SendResult(success=True, message_id=CHUNK_PREFIX + stream.chunk_id)
-        return await self._reply(chat_id, content)
+        return await self._reply(chat_id, content, _reply_extras(reply_to))
 
     async def edit_message(
         self, chat_id, message_id, content, *, finalize: bool = False, **_kwargs
@@ -424,7 +452,7 @@ class SuiteAdapter(BasePlatformAdapter):
             stream.text = content
             self.client.send_reply_chunk(chat_id, stream.chunk_id, content, False)
             return SendResult(success=True, message_id=message_id)
-        result = await self._reply(chat_id, content)
+        result = await self._reply(chat_id, content, stream.reply_extras)
         if not result.success:
             # The bubble stays up with the last text; nothing was persisted.
             return result

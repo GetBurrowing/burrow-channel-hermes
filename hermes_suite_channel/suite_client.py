@@ -584,8 +584,17 @@ class SuiteClient:
             response=response,
         )
 
-    async def send_reply(self, space_id: str, content: str) -> dict:
-        return await self.push("reply", {"space_id": space_id, "content": content}, space_id)
+    async def send_reply(
+        self, space_id: str, content: str, extras: dict[str, Any] | None = None
+    ) -> dict:
+        """``extras``: optional reply annotations (task 01a0d8de), e.g.
+        ``in_reply_to_message_id``. ``None`` values are left off the wire, and an
+        extra can never replace ``space_id`` or ``content``. Core validates each
+        annotation and drops an invalid one (reported in the ack's ``dropped``)
+        without failing the reply."""
+        payload = {k: v for k, v in (extras or {}).items() if v is not None}
+        payload.update(space_id=space_id, content=content)
+        return await self.push("reply", payload, space_id)
 
     async def send_reply_with_media(
         self, space_id: str, content: str, attachments: list[dict[str, Any]]
