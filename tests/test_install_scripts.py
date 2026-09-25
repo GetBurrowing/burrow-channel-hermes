@@ -642,3 +642,11 @@ def test_round_trip_with_the_real_hermes_cli(checkout, tmp_path, token):
     assert sha(home / "config.yaml") == pre_cfg, (home / "config.yaml").read_text()
     assert sha(home / ".env") == pre_env
     assert not token_path(home).exists() and not (home / ".suite-channel").exists()
+
+
+def test_an_env_file_the_install_created_is_removed_when_empty(checkout, home, env, token):
+    (home / ".env").unlink()
+    assert install(checkout, home, env, token).returncode == 0
+    assert (home / ".env").exists()
+    _uninstall(checkout, home, env)
+    assert not (home / ".env").exists()

@@ -12,7 +12,8 @@
 #   - the install record $HERMES_HOME/.suite-channel/;
 #   - the .env lines defining SUITE_URL, SUITE_RUNTIME_ID, SUITE_RUNTIME_TOKEN_FILE,
 #     SUITE_RUNTIME_TOKEN, SUITE_ALLOW_ALL_USERS and SUITE_ALLOWED_USERS.
-#     Every other .env line is kept byte for byte.
+#     Every other .env line is kept byte for byte; a .env the install created
+#     is removed when nothing else is left in it.
 #
 # Hermes's own config snapshots ($HERMES_HOME/backups/config/config.yaml.good.*,
 # written by `hermes config set`) are Hermes's files, not this plugin's, and
@@ -286,8 +287,14 @@ if [ -e "$TOKEN_FILE_PATH" ]; then
   rm -f "$TOKEN_FILE_PATH"
   log "removed the token file $TOKEN_FILE_PATH"
 fi
-if [ -f "$RECORD_DIR/record" ] && grep -qx 'mcp_tokens_existed=0' "$RECORD_DIR/record"; then
-  rmdir "$HERMES_HOME/mcp-tokens" 2>/dev/null || true
+ENV_CREATED=0
+if [ -f "$RECORD_DIR/record" ]; then
+  if grep -qx 'mcp_tokens_existed=0' "$RECORD_DIR/record"; then
+    rmdir "$HERMES_HOME/mcp-tokens" 2>/dev/null || true
+  fi
+  if grep -qx 'env_existed=0' "$RECORD_DIR/record"; then
+    ENV_CREATED=1
+  fi
 fi
 if [ -d "$RECORD_DIR" ]; then
   rm -rf "$RECORD_DIR"
@@ -318,6 +325,11 @@ if [ -f "$ENV_FILE" ]; then
     chmod --reference="$ENV_FILE" "$tmp" 2>/dev/null || chmod 600 "$tmp"
     mv -f "$tmp" "$ENV_FILE"
     log "removed the Suite keys from $ENV_FILE"
+  fi
+  # install.sh created .env and nothing else has written to it since.
+  if [ "$ENV_CREATED" = 1 ] && [ ! -s "$ENV_FILE" ]; then
+    rm -f "$ENV_FILE"
+    log "removed $ENV_FILE (the install created it and it is empty now)"
   fi
 fi
 

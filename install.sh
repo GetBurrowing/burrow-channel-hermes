@@ -363,7 +363,7 @@ PYEOF
 # did not exist yet. An install over an older one that left no record says
 # so (pre_install_known=0), and uninstall then removes only its own keys.
 write_install_record() {
-  local dir="$HERMES_HOME/$RECORD_RELDIR" known=1 existed=0 tokdir=0
+  local dir="$HERMES_HOME/$RECORD_RELDIR" known=1 existed=0 tokdir=0 envfile=0
   [ ! -f "$dir/record" ] || return 0
   if [ -e "$(plugin_dir)" ] || yaml_q has "mcp_servers.$MCP_NAME"; then
     known=0
@@ -375,10 +375,11 @@ write_install_record() {
     chmod 600 "$dir/config.yaml.pre-install"
   fi
   [ ! -d "$HERMES_HOME/mcp-tokens" ] || tokdir=1
+  [ ! -e "$HERMES_HOME/.env" ] || envfile=1
   (
     umask 077
-    printf 'pre_install_known=%s\nconfig_existed=%s\nmcp_tokens_existed=%s\n' \
-      "$known" "$existed" "$tokdir" >"$dir/record"
+    printf 'pre_install_known=%s\nconfig_existed=%s\nmcp_tokens_existed=%s\nenv_existed=%s\n' \
+      "$known" "$existed" "$tokdir" "$envfile" >"$dir/record"
   )
 }
 
