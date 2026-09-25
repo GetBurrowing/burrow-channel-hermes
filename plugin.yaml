@@ -1,0 +1,56 @@
+name: startup-suite-platform
+label: Startup Suite
+kind: platform
+version: 0.1.0
+description: >
+  Startup Suite federation adapter for Hermes Agent. Joins the Suite runtime
+  socket as a federated runtime, delivers Suite attention events (mentions,
+  DMs, task dispatches) into Hermes sessions, and posts replies, typing,
+  progressive reveal and attachments back to the Suite space.
+author: Startup Suite
+requires_env:
+  - name: SUITE_URL
+    description: "Suite runtime socket URL, e.g. wss://suite.example.com/runtime/ws"
+    prompt: "Suite runtime socket URL"
+    password: false
+  - name: SUITE_RUNTIME_ID
+    description: "The federated runtime id registered for this agent in Suite"
+    prompt: "Suite runtime id"
+    password: false
+  - name: SUITE_RUNTIME_TOKEN
+    description: "The runtime token Suite issued for that runtime id"
+    prompt: "Suite runtime token"
+    password: true
+optional_env:
+  - name: SUITE_ALLOWED_USERS
+    description: "Comma-separated Suite display names allowed to drive the agent (suite-system covers task dispatches)"
+    prompt: "Allowed Suite users (comma-separated)"
+    password: false
+  - name: SUITE_ALLOW_ALL_USERS
+    description: "Accept every message Suite delivers (Suite already limits delivery to spaces the agent is in)"
+    prompt: "Allow all Suite users? (true/false)"
+    password: false
+  - name: SUITE_HOME_CHANNEL
+    description: "Suite space id for cron / notification delivery"
+    prompt: "Home space id (or empty)"
+    password: false
+  - name: SUITE_AGENT_ID
+    description: "This agent's Suite agent id, used to drop its own messages if Suite echoes them"
+    prompt: "Suite agent id (optional)"
+    password: false
+  - name: SUITE_RECONNECT_MIN_MS
+    description: "First reconnect delay in ms (default 1000)"
+    prompt: "Reconnect min ms"
+    password: false
+  - name: SUITE_RECONNECT_MAX_MS
+    description: "Reconnect delay cap in ms (default 30000)"
+    prompt: "Reconnect max ms"
+    password: false
+  - name: SUITE_RECONNECT_JITTER
+    description: "Fraction of each reconnect delay removed at random, 0..1 (default 0.2)"
+    prompt: "Reconnect jitter"
+    password: false
+  - name: SUITE_STALE_TRAFFIC_MS
+    description: "Force a reconnect after this long with no socket traffic, in ms (default 120000)"
+    prompt: "Stale traffic ms"
+    password: false

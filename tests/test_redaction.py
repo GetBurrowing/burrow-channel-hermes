@@ -6,13 +6,14 @@ lines that WOULD carry the token (the websockets DEBUG request line and our
 own "connecting to" line), so an empty or unrelated capture cannot pass it.
 """
 
+import asyncio
 import logging
 
 import pytest
 from conftest import make_config
 
 from hermes_suite_channel.redact import REDACTED, RedactingLogger, redact
-from hermes_suite_channel.suite_client import PushTimeout, SuiteClient
+from hermes_suite_channel.suite_client import InvalidSuiteURL, PushTimeout, SuiteClient
 
 SENTINEL = "tok-SENTINEL-01a0d6c5"
 
@@ -75,3 +76,35 @@ async def test_sentinel_token_never_reaches_a_log_record(server, caplog):
         if SENTINEL in r.getMessage() + str(r.exc_text or "")
     ]
     assert leaks == []
+
+
+async def test_malformed_url_error_carries_no_token(caplog):
+    """websockets' InvalidURI formats the WHOLE uri, token included, into its
+    message. The client must re-raise it redacted, with no chained original."""
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import InvalidURI
+
+    from hermes_suite_channel.suite_client import socket_url
+
+    caplog.set_level(logging.DEBUG)
+    cfg = make_config("ftp://suite.example/runtime/ws", token=SENTINEL)
+    # Positive control: the leak vector is live for this exact URL.
+    with pytest.raises(InvalidURI) as raw:
+        await connect(socket_url(cfg))
+    assert SENTINEL in str(raw.value)
+
+    client = SuiteClient(cfg)
+    with pytest.raises(InvalidSuiteURL) as info:
+        await client._session()
+    assert SENTINEL not in str(info.value)
+    assert info.value.__context__ is None and info.value.__cause__ is None
+
+    fatal = []
+    client = SuiteClient(cfg, on_fatal=fatal.append)
+    await client.start()
+    await asyncio.wait_for(client._task, 2)  # terminal: the supervisor stops
+    assert isinstance(client.fatal_error, InvalidSuiteURL) and fatal == [client.fatal_error]
+    assert client.sessions == 0
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "not reconnecting" in text
+    assert SENTINEL not in text

@@ -32,8 +32,14 @@ _TUNABLES: dict[str, tuple[str, type, Any]] = {
 _REQUIRED: dict[str, str] = {
     "url": "SUITE_URL",
     "runtime_id": "SUITE_RUNTIME_ID",
-    "token": "SUITE_TOKEN",
+    "token": "SUITE_RUNTIME_TOKEN",
 }
+
+# Read from env ONLY, never from ``extra``. Hermes serialises a platform's
+# ``extra`` dict in ``PlatformConfig.to_dict()`` (gateway/config.py), which
+# ``GatewayConfig.to_dict()`` nests; a token in ``extra`` (or in the typed
+# ``PlatformConfig.token`` field) would ride along wherever that dict goes.
+_ENV_ONLY = frozenset({"token"})
 
 
 class ConfigError(ValueError):
@@ -80,7 +86,8 @@ class SuiteConfig:
         env = os.environ if env is None else env
         values: dict[str, Any] = {}
         for key, env_name in _REQUIRED.items():
-            values[key] = env.get(env_name) or extra.get(key) or ""
+            from_extra = "" if key in _ENV_ONLY else extra.get(key)
+            values[key] = env.get(env_name) or from_extra or ""
         for key, (env_name, typ, default) in _TUNABLES.items():
             raw = env.get(env_name)
             if raw in (None, ""):

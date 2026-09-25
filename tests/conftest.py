@@ -1,7 +1,19 @@
+import os
+import sys
+
 import pytest
 from fake_phoenix import FakePhoenix
 
 from hermes_suite_channel.config import SuiteConfig
+
+# The adapter tests import the REAL hermes-agent gateway (no stub of its API).
+# HERMES_AGENT_SRC points at a hermes-agent checkout; CI clones the commit
+# pinned in .github/workflows/ci.yml. Missing, the adapter tests fail at
+# collection with a pointer here, never skip: a green run that ran none of
+# them would be the exact failure the CI comment warns about.
+_HERMES_SRC = os.environ.get("HERMES_AGENT_SRC")
+if _HERMES_SRC and _HERMES_SRC not in sys.path:
+    sys.path.insert(0, _HERMES_SRC)
 
 FAST = {
     "reconnect_min_ms": 20,

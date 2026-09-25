@@ -31,6 +31,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # The adapter tests import the REAL hermes-agent gateway. Pinned to the
+      # commit the adapter was written against; bump it deliberately. Without
+      # HERMES_AGENT_SRC those tests fail at collection, they never skip.
+      - run: |
+          git init -q "$RUNNER_TEMP/hermes-agent"
+          git -C "$RUNNER_TEMP/hermes-agent" fetch -q --depth 1 --filter=blob:none \
+            https://github.com/NousResearch/hermes-agent.git "$HERMES_AGENT_SHA"
+          git -C "$RUNNER_TEMP/hermes-agent" checkout -q FETCH_HEAD
+          echo "HERMES_AGENT_SRC=$RUNNER_TEMP/hermes-agent" >> "$GITHUB_ENV"
+        env:
+          HERMES_AGENT_SHA: fdec926ef54391edcf6caad5f7f6761fdcccdaa2
       - run: python3 -m venv .venv
       - run: .venv/bin/pip install -e '.[dev]'
       - run: .venv/bin/ruff check .

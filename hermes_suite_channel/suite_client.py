@@ -179,6 +179,11 @@ class AttachmentTooLarge(SuiteError):
     """Rejected locally against core's attachment caps; nothing was sent."""
 
 
+class InvalidSuiteURL(SuiteError):
+    """SUITE_URL cannot be dialled as a websocket URI. Terminal: retrying the
+    same URL cannot succeed, so the supervisor stops instead of looping."""
+
+
 class _SessionEnded(Exception):
     """Internal: this socket session is over; the supervisor reconnects."""
 
@@ -196,6 +201,7 @@ class SuiteClient:
         on_disconnect: Handler = None,
         on_spaces_manifest: Handler = None,
         on_meeting_transcript: Handler = None,
+        on_fatal: Handler = None,
         rng: Callable[[], float] = random.random,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -212,6 +218,7 @@ class SuiteClient:
             "disconnect": on_disconnect,
             "spaces_manifest": on_spaces_manifest,
             "meeting_transcript": on_meeting_transcript,
+            "fatal": on_fatal,
         }
         self._rng = rng
         self._refs = itertools.count(1)
@@ -229,6 +236,7 @@ class SuiteClient:
         self._chunk_refusals: dict[str, str] = {}
         self._bg: set[asyncio.Task] = set()
         self.sessions = 0
+        self.fatal_error: SuiteError | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────
 
@@ -277,6 +285,13 @@ class SuiteClient:
                 await self._session()
             except asyncio.CancelledError:
                 raise
+            except InvalidSuiteURL as exc:
+                self.fatal_error = exc
+                self._log.error("%s; not reconnecting", exc)
+                self._end_session()
+                self._stopped = True
+                self._call("fatal", exc)
+                break
             except Exception as exc:  # noqa: BLE001 - every failure means "reconnect"
                 self._log.warning("session ended: %s: %s", type(exc).__name__, exc)
             finally:
@@ -295,13 +310,8 @@ class SuiteClient:
         cfg = self._config
         url = socket_url(cfg)
         self._log.info("connecting to %s (attempt %d)", url, self._attempts + 1)
-        async with connect(
-            url,
-            open_timeout=cfg.join_timeout_ms / 1000,
-            ping_interval=None,
-            max_size=MAX_INCOMING_FRAME,
-            logger=self._ws_log,
-        ) as ws:
+        ws = await self._dial(connect, url)
+        async with ws:
             self.sessions += 1
             self._ws = ws
             self._last_traffic = time.monotonic()
@@ -319,6 +329,40 @@ class SuiteClient:
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _dial(self, connect: Any, url: str) -> Any:
+        """Open the socket. The URL is parsed FIRST, with the same parser
+        ``connect`` uses, so only a parse failure is classified as terminal;
+        a network or handshake error during the dial still reconnects.
+
+        A malformed URL is re-raised as ``InvalidSuiteURL`` carrying no part
+        of the URL: ``websockets.exceptions.InvalidURI`` formats the WHOLE
+        uri, query string and token included, into its message. The redacted
+        error is raised OUTSIDE the ``except`` block so it has no
+        ``__context__`` holding the original either."""
+        from websockets.exceptions import InvalidURI
+        from websockets.uri import parse_uri
+
+        problem: str | None = None
+        try:
+            parse_uri(url)
+        except InvalidURI:
+            problem = "is not a valid ws:// or wss:// URI"
+        except ValueError:
+            # urllib's parse errors (bad port, bad IPv6 literal). Their text
+            # does not carry the URL today; classified the same way anyway.
+            problem = "could not be parsed"
+        if problem is not None:
+            raise InvalidSuiteURL(
+                f"SUITE_URL {problem} (value withheld: the dial URL carries the token)"
+            )
+        return await connect(
+            url,
+            open_timeout=self._config.join_timeout_ms / 1000,
+            ping_interval=None,
+            max_size=MAX_INCOMING_FRAME,
+            logger=self._ws_log,
+        )
 
     def _end_session(self) -> None:
         self._joined.clear()

@@ -40,7 +40,14 @@ class FakePhoenix:
 
     async def __aenter__(self) -> FakePhoenix:
         self._server = await serve(
-            self._handle, "127.0.0.1", 0, process_request=self._process_request, logger=_SILENT
+            self._handle,
+            "127.0.0.1",
+            0,
+            process_request=self._process_request,
+            logger=_SILENT,
+            # Phoenix's websocket transport has no frame cap by default; the
+            # websockets default (1 MiB) would drop a near-10 MiB attachment.
+            max_size=None,
         )
         self.port = self._server.sockets[0].getsockname()[1]
         return self
