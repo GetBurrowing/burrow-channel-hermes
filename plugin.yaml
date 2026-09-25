@@ -20,7 +20,12 @@ requires_env:
   - name: SUITE_RUNTIME_TOKEN
     description: "The runtime token Suite issued for that runtime id"
     prompt: "Suite runtime token"
+    # `password` masks it in `hermes config`; `secret` masks the prompt that
+    # `hermes plugins install` shows for an unset requires_env variable
+    # (hermes_cli/plugins_cmd_install.py _prompt_plugin_env_vars). Without
+    # `secret` that prompt echoes the token.
     password: true
+    secret: true
 optional_env:
   - name: SUITE_ALLOWED_USERS
     description: "Comma-separated Suite display names allowed to drive the agent (suite-system covers task dispatches)"

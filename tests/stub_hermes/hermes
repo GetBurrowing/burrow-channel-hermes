@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""A stand-in `hermes` for tests/test_install_scripts.py.
+
+It implements the handful of subcommands install.sh / uninstall.sh /
+update.sh call, with the same argument shapes as the real CLI at hermes-agent
+fdec926e (`plugins install|enable|disable|remove`, `config get|set|unset`),
+and it records its argv, one JSON line per call, to $HERMES_STUB_LOG. That
+log is what the no-token-on-argv test reads.
+
+State lives in $HERMES_HOME/config.yaml as lines `# hermes-stub: <key> = <json>`
+appended after whatever the file already held, so the round-trip test can
+check that every pre-existing byte survives, and in
+$HERMES_HOME/plugins/.install-metadata.json like the real CLI.
+
+Deliberately NOT faithful: the real `plugins remove` leaves
+`plugins: {enabled: [], disabled: []}` and a `_config_version` stamp behind in
+config.yaml; this stub removes its lines completely. The README records what
+the real CLI leaves.
+
+HERMES_STUB_FAIL_INSTALL=1 makes `plugins install` fail (the copy-fallback test).
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+PREFIX = "# hermes-stub: "
+
+
+def home() -> Path:
+    return Path(os.environ["HERMES_HOME"])
+
+
+def log_argv() -> None:
+    path = os.environ.get("HERMES_STUB_LOG")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"argv": sys.argv, "stdin_isatty": os.isatty(0)}) + "\n")
+
+
+def read_config() -> tuple[str, dict]:
+    cfg = home() / "config.yaml"
+    text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
+    kept, state = [], {}
+    for line in text.splitlines(keepends=True):
+        if line.startswith(PREFIX):
+            key, _, value = line[len(PREFIX) :].rstrip("\n").partition(" = ")
+            state[key] = json.loads(value)
+        else:
+            kept.append(line)
+    return "".join(kept), state
+
+
+def write_config(user_text: str, state: dict) -> None:
+    cfg = home() / "config.yaml"
+    body = user_text + "".join(
+        f"{PREFIX}{k} = {json.dumps(v)}\n" for k, v in sorted(state.items())
+    )
+    if body or cfg.exists():
+        cfg.write_text(body, encoding="utf-8")
+    if not body and cfg.exists() and cfg.stat().st_size == 0:
+        cfg.unlink()
+
+
+def metadata() -> dict:
+    p = home() / "plugins" / ".install-metadata.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def save_metadata(meta: dict) -> None:
+    p = home() / "plugins" / ".install-metadata.json"
+    if meta:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(meta, sort_keys=True))
+    elif p.exists():
+        p.unlink()
+
+
+def fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def plugins(args: list[str]) -> None:
+    verb, rest = args[0], args[1:]
+    text, state = read_config()
+    enabled = state.get("plugins.enabled", [])
+    if verb == "install":
+        src = rest[0]
+        ref = rest[rest.index("--ref") + 1] if "--ref" in rest else "HEAD"
+        if os.environ.get("HERMES_STUB_FAIL_INSTALL") == "1":
+            fail("Error: stub told to refuse this install")
+        if not src.startswith("file://"):
+            fail(f"Error: stub cannot fetch {src}")
+        repo = src[len("file://") :]
+        name = "startup-suite-platform"
+        target = home() / "plugins" / name
+        if target.exists() and "--force" not in rest:
+            fail(f"Plugin '{name}' already exists.")
+        subprocess.run(["rm", "-rf", str(target)], check=True)
+        target.mkdir(parents=True)
+        archive = subprocess.run(
+            ["git", "-C", repo, "archive", ref], check=True, capture_output=True
+        ).stdout
+        subprocess.run(["tar", "-x", "-C", str(target)], input=archive, check=True)
+        meta = metadata()
+        meta[name] = {"source": src, "revision": ref, "pinned": "--ref" in rest}
+        save_metadata(meta)
+        print(f"Plugin installed: {src}")
+    elif verb == "enable":
+        if rest[0] not in enabled:
+            state["plugins.enabled"] = enabled + [rest[0]]
+            write_config(text, state)
+    elif verb == "disable":
+        if rest[0] in enabled:
+            enabled = [n for n in enabled if n != rest[0]]
+            if enabled:
+                state["plugins.enabled"] = enabled
+            else:
+                state.pop("plugins.enabled")
+            write_config(text, state)
+    elif verb == "remove":
+        meta = metadata()
+        if rest[0] not in meta:
+            fail(f"Plugin '{rest[0]}' has no install record")
+        subprocess.run(["rm", "-rf", str(home() / "plugins" / rest[0])], check=True)
+        del meta[rest[0]]
+        save_metadata(meta)
+        plugins(["disable", rest[0]])
+    else:
+        fail(f"stub: unsupported plugins verb {verb}")
+
+
+def config(args: list[str]) -> None:
+    verb, rest = args[0], args[1:]
+    text, state = read_config()
+    if verb == "get":
+        key = rest[0]
+        if key not in state:
+            print(f"Config key not set: {key}")
+            sys.exit(1)
+        value = state[key]
+        print(json.dumps(value) if "--json" in rest else value)
+    elif verb == "set":
+        state[rest[0]] = rest[1]
+        write_config(text, state)
+    elif verb == "unset":
+        key = rest[0]
+        gone = [k for k in state if k == key or k.startswith(key + ".")]
+        if not gone:
+            fail(f"Config key not set: {key}")
+        for k in gone:
+            del state[k]
+        write_config(text, state)
+    else:
+        fail(f"stub: unsupported config verb {verb}")
+
+
+def main() -> None:
+    log_argv()
+    args = sys.argv[1:]
+    if args[:1] == ["--version"]:
+        print("Hermes Agent (test stub)")
+    elif args[:1] == ["plugins"]:
+        plugins(args[1:])
+    elif args[:1] == ["config"]:
+        config(args[1:])
+    else:
+        fail(f"stub: unsupported command {args}")
+
+
+if __name__ == "__main__":
+    main()

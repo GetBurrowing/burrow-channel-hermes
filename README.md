@@ -6,13 +6,133 @@ platform plugin for Startup Suite federation. A sibling of
 socket, runtime id and token, with Suite attention events delivered into a
 Hermes session and replies pushed back.
 
-Status: transport and Hermes platform adapter. The installer and the Suite
-MCP registration land in stage 4 of task 01a0d6c5.
+Status: transport, Hermes platform adapter, installer (task 01a0d6c5 stages
+1-4).
 
 The repository root IS the Hermes plugin directory: `plugin.yaml`
 (`kind: platform`, name `startup-suite-platform`), `__init__.py` exporting
 `register`, and `adapter.py`. `register(ctx)` registers the gateway platform
 `startup_suite` (config key `gateway.platforms.startup_suite`).
+
+## Install
+
+Prerequisite: Hermes Agent is installed and `hermes` is on PATH (or pass
+`--hermes BIN`). In Suite, register a federated runtime for the agent and
+generate its token (the token is shown once).
+
+```sh
+# From a checkout (the token on stdin; it is never accepted on argv):
+printf '%s' "$SUITE_TOKEN" | ./install.sh \
+  --url wss://suite.example.com/runtime/ws --runtime-id my-runtime --allow-all-users
+
+# One command, no checkout (stdin is the script here, so the token comes from
+# --token-file, else a no-echo prompt on the terminal):
+curl -fsSL <raw url>/install.sh | bash -s -- \
+  --url wss://suite.example.com/runtime/ws --runtime-id my-runtime \
+  --token-file ~/.suite-token [--hermes-home DIR]
+
+hermes gateway restart     # or `hermes gateway run` in the foreground
+```
+
+The token is read from `--token-file PATH` when given; else from stdin when
+stdin is not a terminal and the script is a file (under `curl | bash` stdin is
+the script); else from a no-echo prompt on `/dev/tty`. `--token` and
+`--token=...` are refused with an error: argv is readable by every local user
+through `ps` and `/proc/<pid>/cmdline`.
+
+What install.sh changes, and nothing else:
+
+| Where | What |
+| --- | --- |
+| `$HERMES_HOME/.env` (mode 0600) | `SUITE_URL`, `SUITE_RUNTIME_ID`, `SUITE_RUNTIME_TOKEN`; `SUITE_ALLOW_ALL_USERS=true` with `--allow-all-users`, `SUITE_ALLOWED_USERS` with `--allowed-users CSV` |
+| `$HERMES_HOME/plugins/startup-suite-platform` | the plugin, via `hermes plugins install <source> --ref <sha> --no-enable`, then `hermes plugins enable startup-suite-platform` |
+| `hermes_suite_channel/_build.py` in that copy | `BUILD = "<installed sha>"` (the build stamp core shows as the runtime's build) |
+| `config.yaml` `mcp_servers.startup-suite` | via `hermes config set`: `url` and `headers.Authorization` |
+
+`$HERMES_HOME` defaults to `$HERMES_HOME`, else `~/.hermes`. `.env` is Hermes's
+secret store (`hermes_cli/config.py` `get_env_path`); install.sh writes the
+lines itself, in the unquoted `KEY=value` form Hermes's own `save_env_value`
+writes, and refuses a value with whitespace, `#`, a quote or a backslash so
+that stays true. The env keys are written before the plugin is installed:
+`hermes plugins install` prompts for any unset `requires_env` variable.
+
+Two install details that were measured, not assumed (hermes-agent fdec926e):
+
+- **Enable is a separate step.** A non-interactive `hermes plugins install
+  --enable` refuses to enable a plugin that declares Python dependencies
+  ("dependency install skipped (non-interactive)"). `hermes plugins enable`
+  run non-interactively does resolve and install them, so install.sh installs
+  with `--no-enable` and then enables.
+- **Private repository.** `hermes plugins install` accepts `file://` sources
+  (with a warning) and `--ref <40-char sha>`. Run from a checkout, install.sh
+  installs `file://<checkout>` at its HEAD. Without a checkout it clones
+  `--repo` (default `https://github.com/Startup-Suite/hermes-suite-channel.git`)
+  with your own git credentials, asks Hermes to install the https URL (Hermes
+  tries `GITHUB_TOKEN`/`GH_TOKEN` from `.env`, then `gh auth`, then the git
+  credential helper), and retries from the local clone. `--copy-fallback`
+  copies the committed tree into `$HERMES_HOME/plugins/` when Hermes refuses
+  both. It is opt-in because the exit code cannot tell a fetch failure from a
+  refusal by Hermes's install-time security scan, and a copied plugin has no
+  Hermes install record.
+
+Every run is idempotent: a second run with the same arguments changes no file
+(the plugin at the same sha is not reinstalled, and `config set` is skipped
+when the value already matches). The last line printed on success is exactly
+`hermes-suite-channel: installed`; uninstall.sh and update.sh end with
+`hermes-suite-channel: uninstalled` and `hermes-suite-channel: updated`. The
+Suite desktop app keys on those lines.
+
+### Uninstall
+
+```sh
+./uninstall.sh [--hermes-home DIR]
+```
+
+Removes, in order: `mcp_servers.startup-suite` (`hermes config unset`), the
+plugin (`hermes plugins remove`; a copy-fallback install is disabled and
+deleted), and the `.env` lines defining the five `SUITE_*` keys above. Other
+`.env` lines are kept byte for byte. Two things a round trip does not give
+back: a missing final newline on `.env` (install.sh terminates the last line
+before appending, as Hermes's writer does), and what Hermes itself writes to
+`config.yaml` when a plugin is enabled and removed. With real Hermes
+(fdec926e) removing the plugin leaves `plugins: {enabled: [], disabled: []}`
+and a `_config_version` stamp in a `config.yaml` that had neither; nothing
+this plugin added survives. The tests' stub `hermes` removes its lines
+completely, so the byte-identical round-trip test covers install.sh's own
+edits and the pairing of every Hermes call with its undo, not Hermes's
+serialiser.
+
+### Update
+
+```sh
+./update.sh [--hermes-home DIR]            # install this checkout's HEAD
+curl -fsSL <raw url>/update.sh | bash -s -- [--ref SHA]
+```
+
+Like `openclaw-suite-channel`'s update.sh: it refreshes the plugin files and
+preserves the configuration. `.env` and the MCP entry are not touched and the
+token is not read. It runs `install.sh --plugin-only`, which reinstalls with
+`--force --ref <sha>` and restamps `_build.py`. Restart the gateway afterwards.
+
+## Suite tools (MCP)
+
+Suite's tools (messaging, tasks, plans, canvases, memory, ...) are served by
+core's `/mcp` endpoint under the same runtime token (ADR 0034). This plugin
+registers no tools of its own. install.sh registers the endpoint as a Hermes
+MCP server:
+
+```yaml
+mcp_servers:
+  startup-suite:
+    url: https://suite.example.com/mcp          # derived from --url; --mcp-url overrides
+    headers:
+      Authorization: Bearer ${SUITE_RUNTIME_TOKEN}
+```
+
+The header holds the placeholder, not the token. Hermes resolves `${VAR}`
+from the environment, `.env` included, when it connects
+(website/docs/user-guide/features/mcp.md, "Runtime `${ENV_VAR}` substitution"),
+so the token lives only in `.env`.
 
 ## Layout
 
@@ -27,6 +147,8 @@ The repository root IS the Hermes plugin directory: `plugin.yaml`
 | `hermes_suite_channel/redact.py` | `redact()` and `RedactingLogger`: the only path a log record takes |
 | `hermes_suite_channel/_build.py` | `BUILD`, stamped by the installer, never read from git at runtime |
 | `tests/fake_phoenix.py` | hermetic fake runtime socket on `websockets.serve` |
+| `install.sh`, `uninstall.sh`, `update.sh` | the installer (see Install) |
+| `tests/stub_hermes/hermes`, `tests/test_install_scripts.py` | the installer tests, against a stub `hermes` that records its argv |
 
 ## Settings
 
@@ -169,6 +291,27 @@ push-timeout paths. A malformed `SUITE_URL` is terminal: `websockets`'
 `InvalidURI` puts the whole URI, token included, in its message, so the client
 re-raises it as `InvalidSuiteURL` with no URL and no chained original, stops
 reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
+
+## Security notes
+
+- The token is never on any process's argv. install.sh reads and writes it
+  with bash builtins only (`read`, `printf`), and every `hermes` child runs
+  with stdin on `/dev/null`. `tests/test_install_scripts.py` asserts a
+  sentinel token is absent from the argv of every `hermes` call (the stub
+  records them) and, where `strace` exists, from every `execve` of the whole
+  install; a companion test runs an installer mutated to pass the token to
+  `hermes config set` and requires the same check to catch it.
+- The token is written only to `$HERMES_HOME/.env` (mode 0600). It is not in
+  `config.yaml`, and the adapter never puts it in `PlatformConfig` (see Token
+  hygiene): Hermes serialises `PlatformConfig.to_dict()`.
+- `plugin.yaml` marks `SUITE_RUNTIME_TOKEN` `secret: true` as well as
+  `password: true`. Hermes's install-time prompt for an unset `requires_env`
+  variable masks only `secret` entries; `password` masks it in `hermes
+  config`. `tests/test_plugin_load.py` drives Hermes's own prompt function.
+- Suite message text arrives wrapped in the untrusted envelope and can never
+  run Hermes slash commands (`allow_gateway_control=False`).
+- Revoking the runtime in Suite (or `Platform.Federation.revoke_runtime/1`)
+  clears its token hash; the old token is then refused on reconnect.
 
 ## Development
 
