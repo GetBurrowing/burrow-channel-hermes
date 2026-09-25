@@ -46,3 +46,31 @@ def test_token_is_never_read_from_extra():
     # Hermes serialises `extra` in PlatformConfig.to_dict(); the token must not live there.
     with pytest.raises(ConfigError, match="token"):
         SuiteConfig.from_extra({**BASE, "token": "tok-extra-01a0d6c5"}, env={})
+
+
+def test_token_file_wins_and_errors_name_the_path_not_the_content(tmp_path):
+    tf = tmp_path / "tok"
+    tf.write_text("tok-file-01a0d6c5\n")
+    tf.chmod(0o600)
+    env = {**ENV, "SUITE_RUNTIME_TOKEN_FILE": str(tf)}
+    assert SuiteConfig.from_extra(BASE, env=env).token == "tok-file-01a0d6c5"
+    tf.chmod(0o644)
+    with pytest.raises(ConfigError, match="chmod 600") as info:
+        SuiteConfig.from_extra(BASE, env=env)
+    assert "tok-file-01a0d6c5" not in str(info.value)
+    with pytest.raises(ConfigError, match="cannot read token file"):
+        SuiteConfig.from_extra(BASE, env={"SUITE_RUNTIME_TOKEN_FILE": str(tmp_path / "none")})
+
+
+def test_default_token_file_then_env_then_fallback(tmp_path):
+    default = tmp_path / "default"
+    assert SuiteConfig.from_extra(BASE, env=ENV, default_token_file=default).token == (
+        "tok-cfg-01a0d6c5"
+    )
+    default.write_text("tok-default-01a0d6c5")
+    default.chmod(0o600)
+    assert SuiteConfig.from_extra(BASE, env=ENV, default_token_file=default).token == (
+        "tok-default-01a0d6c5"
+    )
+    cfg = SuiteConfig.from_extra(BASE, env={}, fallback_token="tok-fallback-01a0d6c5")
+    assert cfg.token == "tok-fallback-01a0d6c5"

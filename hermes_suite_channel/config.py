@@ -12,8 +12,10 @@ sibling has none.
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 # key in `extra` -> (env var, type, default)
@@ -35,6 +37,16 @@ _REQUIRED: dict[str, str] = {
     "token": "SUITE_RUNTIME_TOKEN",
 }
 
+TOKEN_ENV = "SUITE_RUNTIME_TOKEN"
+TOKEN_FILE_ENV = "SUITE_RUNTIME_TOKEN_FILE"
+# Where install.sh puts the token, relative to the (profile's) Hermes home.
+# mcp-tokens/ is Hermes's own credential directory: its file tools, media
+# delivery, context references and dashboard file router all refuse to read
+# it (agent/file_safety.py _READ_DENIED_DIRS, gateway/platforms/base.py), the
+# same protection $HERMES_HOME/.env gets. Hermes names its own files there
+# `<server>.json` / `.client.json` / `.meta.json`, so this name cannot collide.
+TOKEN_FILE_RELPATH = Path("mcp-tokens") / "startup-suite-platform.runtime-token"
+
 # Read from env ONLY, never from ``extra``. Hermes serialises a platform's
 # ``extra`` dict in ``PlatformConfig.to_dict()`` (gateway/config.py), which
 # ``GatewayConfig.to_dict()`` nests; a token in ``extra`` (or in the typed
@@ -44,6 +56,45 @@ _ENV_ONLY = frozenset({"token"})
 
 class ConfigError(ValueError):
     """A missing or malformed setting. Messages name keys, never values."""
+
+
+def read_token_file(path: str | os.PathLike) -> str:
+    """The token held in ``path``: first line, surrounding whitespace removed.
+
+    Refused when group or other can read the file (the ssh rule): a token file
+    another local user can read is a leaked token. Errors name the path, never
+    the content.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            mode = os.fstat(f.fileno()).st_mode
+            first = f.readline()
+    except OSError as exc:
+        raise ConfigError(f"cannot read token file {path}: {type(exc).__name__}") from None
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise ConfigError(f"token file {path} is readable by group or other; chmod 600 it")
+    return first.strip()
+
+
+def resolve_token(
+    env: Mapping[str, str], default_token_file: str | os.PathLike | None = None
+) -> str:
+    """The runtime token, from (in order) the file named by
+    SUITE_RUNTIME_TOKEN_FILE, ``default_token_file`` when it exists, or the
+    legacy SUITE_RUNTIME_TOKEN variable. "" when none is set.
+
+    The file forms keep the token out of every process environment. The
+    variable form cannot: Hermes copies $HERMES_HOME/.env into os.environ at
+    start, on every gateway turn and before every MCP config load
+    (hermes_cli/env_loader.py load_hermes_dotenv), and children spawned
+    without a scrub inherit it. See README "Security notes".
+    """
+    named = env.get(TOKEN_FILE_ENV)
+    if named:
+        return read_token_file(named)
+    if default_token_file is not None and os.path.lexists(default_token_file):
+        return read_token_file(default_token_file)
+    return env.get(TOKEN_ENV) or ""
 
 
 @dataclass(frozen=True)
@@ -80,12 +131,22 @@ class SuiteConfig:
 
     @classmethod
     def from_extra(
-        cls, extra: Mapping[str, Any] | None, env: Mapping[str, str] | None = None
+        cls,
+        extra: Mapping[str, Any] | None,
+        env: Mapping[str, str] | None = None,
+        *,
+        default_token_file: str | os.PathLike | None = None,
+        fallback_token: str | None = None,
     ) -> SuiteConfig:
+        """``fallback_token`` is used only when no file or variable names one
+        (the adapter passes the value it took out of os.environ at load)."""
         extra = extra or {}
         env = os.environ if env is None else env
         values: dict[str, Any] = {}
         for key, env_name in _REQUIRED.items():
+            if key == "token":
+                values[key] = resolve_token(env, default_token_file) or fallback_token or ""
+                continue
             from_extra = "" if key in _ENV_ONLY else extra.get(key)
             values[key] = env.get(env_name) or from_extra or ""
         for key, (env_name, typ, default) in _TUNABLES.items():

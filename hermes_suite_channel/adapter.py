@@ -51,12 +51,12 @@ from pathlib import Path
 from typing import Any
 
 from gateway.config import Platform
-from gateway.platforms._shared import get_scoped_secret
+from gateway.platforms._shared import get_scoped_secret, profile_scoped
 from gateway.platforms.base import BasePlatformAdapter, SendResult
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.platforms.helpers import MessageDeduplicator
 
-from .config import ConfigError, SuiteConfig
+from .config import TOKEN_ENV, TOKEN_FILE_ENV, TOKEN_FILE_RELPATH, ConfigError, SuiteConfig
 from .envelope import wrap_untrusted
 from .inbound import Attention, parse_attention
 from .redact import RedactingLogger
@@ -87,7 +87,9 @@ SENT_ID_CAPACITY = 500
 STREAM_CAPACITY = 200
 DEDUPE_TTL_S = 300
 
-REQUIRED_ENV = ["SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN"]
+# What `hermes setup` lists. The token itself is not an env setting: it lives
+# in the file SUITE_RUNTIME_TOKEN_FILE names (install.sh writes both).
+REQUIRED_ENV = ["SUITE_URL", "SUITE_RUNTIME_ID", TOKEN_FILE_ENV]
 
 PLATFORM_HINT = (
     "You are chatting in a Startup Suite space. Suite renders markdown, so format replies "
@@ -104,6 +106,54 @@ class _ScopedEnv:
 
     def get(self, name: str, default: Any = None) -> Any:
         return get_scoped_secret(name, default)
+
+
+# The legacy SUITE_RUNTIME_TOKEN value, moved out of os.environ by
+# _take_env_token(). Held here (and in the adapter's SuiteConfig) only.
+_ENV_TOKEN: str | None = None
+
+
+def _take_env_token() -> str | None:
+    """Remove SUITE_RUNTIME_TOKEN from ``os.environ``, keeping its value here.
+
+    Every child Hermes spawns without a scrub inherits ``os.environ`` (the
+    toolchain probe, tools/env_probe.py, runs ``pip --version`` that way), so
+    a token left there is a token in every such child. Called from
+    ``register`` (plugin load, before the gateway starts any agent work) and
+    again whenever a config is built.
+
+    This only helps an install that put the token in the environment. When it
+    sits in $HERMES_HOME/.env, Hermes copies it back into os.environ on every
+    gateway turn and before every MCP config load, so the token-file install
+    (install.sh) is the form that keeps it out; see README "Security notes".
+    """
+    global _ENV_TOKEN
+    value = os.environ.pop(TOKEN_ENV, None)
+    if value:
+        _ENV_TOKEN = value
+    return _ENV_TOKEN
+
+
+def _default_token_file() -> Path | None:
+    try:
+        from hermes_constants import get_hermes_home
+    except ImportError:  # pragma: no cover - always present under Hermes
+        return None
+    return get_hermes_home() / TOKEN_FILE_RELPATH
+
+
+def load_suite_config(extra: dict[str, Any] | None) -> SuiteConfig:
+    """The adapter's settings. The token comes from, in order: the file named
+    by SUITE_RUNTIME_TOKEN_FILE, $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token,
+    the scoped SUITE_RUNTIME_TOKEN secret, and last the value
+    ``_take_env_token`` removed from os.environ. That last one is the launch
+    profile's, so it is never used inside a multiplexed secondary profile's
+    scope (the same rule as ``get_scoped_secret``)."""
+    _take_env_token()
+    fallback = None if profile_scoped() else _ENV_TOKEN
+    return SuiteConfig.from_extra(
+        extra, env=_ScopedEnv(), default_token_file=_default_token_file(), fallback_token=fallback
+    )
 
 
 @dataclass
@@ -151,7 +201,7 @@ class SuiteAdapter(BasePlatformAdapter):
         self._config_error: str | None = None
         self.suite_config: SuiteConfig | None = None
         try:
-            self.suite_config = SuiteConfig.from_extra(extra, env=_ScopedEnv())
+            self.suite_config = load_suite_config(extra)
         except ConfigError as exc:
             self._config_error = str(exc)
         token = self.suite_config.token if self.suite_config else None
@@ -495,18 +545,25 @@ def _env_value(name: str) -> str:
 
 
 def check_requirements() -> bool:
-    """Passive probe: the one runtime dependency importable and the env set."""
+    """Passive probe: the one runtime dependency importable, the URL and
+    runtime id set, and a token readable from one of its sources."""
     try:
         import websockets  # noqa: F401
     except ImportError:
         return False
-    return all(_env_value(n) for n in REQUIRED_ENV)
+    if not (_env_value("SUITE_URL") and _env_value("SUITE_RUNTIME_ID")):
+        return False
+    try:
+        load_suite_config({})
+    except ConfigError:
+        return False
+    return True
 
 
 def validate_config(config) -> bool:
     extra = getattr(config, "extra", {}) or {}
     try:
-        SuiteConfig.from_extra(extra, env=_ScopedEnv())
+        load_suite_config(extra)
     except ConfigError:
         return False
     return True
@@ -535,6 +592,7 @@ def _env_enablement() -> dict | None:
 
 def register(ctx):
     """Plugin entry point: called by the Hermes plugin system."""
+    _take_env_token()
     ctx.register_platform(
         name=PLATFORM_NAME,
         label=LABEL,

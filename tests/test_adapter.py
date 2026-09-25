@@ -51,6 +51,9 @@ class FakeCtx:
 
 @pytest.fixture(autouse=True)
 def hermes_env(monkeypatch, tmp_path):
+    # Each test starts with no token held from an earlier test's register().
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    monkeypatch.delenv("SUITE_RUNTIME_TOKEN_FILE", raising=False)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     monkeypatch.setenv("HERMES_GATEWAY_LOCK_DIR", str(tmp_path / "locks"))
     monkeypatch.setenv("SUITE_RUNTIME_ID", "rt-01a0d6c5")
@@ -108,7 +111,7 @@ async def settle():
 def test_register_uses_real_platform_entry_kwargs(hermes_env):
     kw = hermes_env.kwargs
     assert kw["name"] == "startup_suite"
-    assert kw["required_env"] == ["SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN"]
+    assert kw["required_env"] == ["SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN_FILE"]
     assert kw["allowed_users_env"] == "SUITE_ALLOWED_USERS"
     assert kw["allow_all_env"] == "SUITE_ALLOW_ALL_USERS"
     for fn in ("check_fn", "validate_config", "is_connected", "env_enablement_fn"):
@@ -134,11 +137,97 @@ def test_env_enablement_never_seeds_the_token(monkeypatch):
 
 
 def test_missing_token_fails_connect_without_naming_values(monkeypatch):
-    monkeypatch.delenv("SUITE_RUNTIME_TOKEN")
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
     adapter = make_adapter("wss://suite.example/runtime/ws")
     assert asyncio.run(adapter.connect()) is False
     assert adapter._fatal_error_code == "config_missing"
     assert "token" in adapter._fatal_error_message
+
+
+# ── the token stays out of os.environ ─────────────────────────────────────
+
+
+def test_plugin_load_takes_the_token_out_of_os_environ(hermes_env):
+    """register() (plugin load) ran in the autouse fixture with the token in
+    the environment. Every child Hermes spawns without a scrub inherits
+    os.environ (tools/env_probe.py runs `pip --version` that way), so after
+    load the variable must be gone."""
+    import os
+
+    assert "SUITE_RUNTIME_TOKEN" not in os.environ
+    assert adapter_mod._ENV_TOKEN == TOKEN
+
+
+async def test_client_still_connects_with_the_token_after_load(server, monkeypatch):
+    import os
+
+    monkeypatch.setenv("SUITE_URL", server.url)
+    assert "SUITE_RUNTIME_TOKEN" not in os.environ
+    adapter = make_adapter(server.url)
+    assert await adapter.connect() is True
+    try:
+        assert any(f"token={TOKEN}" in path for path in server.request_paths)
+        assert "SUITE_RUNTIME_TOKEN" not in os.environ
+    finally:
+        await adapter.disconnect()
+
+
+def _token_file(path, token, mode=0o600):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(token + "\n")
+    path.chmod(mode)
+    return path
+
+
+async def test_token_file_named_by_env_is_used_and_never_enters_the_env(
+    server, monkeypatch, tmp_path
+):
+    import os
+
+    file_token = "tok-file-SENTINEL-01a0d6c5"
+    tf = _token_file(tmp_path / "tok", file_token)
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    monkeypatch.setenv("SUITE_RUNTIME_TOKEN_FILE", str(tf))
+    monkeypatch.setenv("SUITE_URL", server.url)
+    adapter = make_adapter(server.url)
+    assert adapter.suite_config.token == file_token
+    assert await adapter.connect() is True
+    try:
+        assert any(f"token={file_token}" in path for path in server.request_paths)
+        assert file_token not in "".join(os.environ.values())
+    finally:
+        await adapter.disconnect()
+
+
+def test_default_token_file_under_hermes_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUITE_URL", "wss://suite.example/runtime/ws")
+    from hermes_suite_channel.config import TOKEN_FILE_RELPATH
+
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    _token_file(tmp_path / "hermes" / TOKEN_FILE_RELPATH, "tok-default-01a0d6c5")
+    adapter = make_adapter("wss://suite.example/runtime/ws")
+    assert adapter.suite_config.token == "tok-default-01a0d6c5"
+    assert adapter_mod.check_requirements() is True
+
+
+def test_group_readable_token_file_is_refused_without_its_content(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUITE_URL", "wss://suite.example/runtime/ws")
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    tf = _token_file(tmp_path / "tok", "tok-loose-01a0d6c5", mode=0o640)
+    monkeypatch.setenv("SUITE_RUNTIME_TOKEN_FILE", str(tf))
+    adapter = make_adapter("wss://suite.example/runtime/ws")
+    assert adapter.suite_config is None
+    assert "chmod 600" in adapter._config_error
+    assert "tok-loose-01a0d6c5" not in adapter._config_error
+    assert adapter_mod.check_requirements() is False
+
+
+def test_env_token_is_not_borrowed_inside_a_secondary_profile_scope(monkeypatch):
+    """The value taken out of os.environ is the LAUNCH profile's; a
+    multiplexed secondary profile must never fall back to it."""
+    monkeypatch.setattr(adapter_mod, "profile_scoped", lambda: True)
+    adapter = make_adapter("wss://suite.example/runtime/ws")
+    assert adapter.suite_config is None and "token" in adapter._config_error
 
 
 # ── inbound ───────────────────────────────────────────────────────────────

@@ -25,9 +25,11 @@ def test_hermes_loads_and_registers_the_plugin(monkeypatch, tmp_path):
     manifest = parse_manifest_file(ROOT / "plugin.yaml", ROOT, "user", "")
     assert (manifest.name, manifest.kind) == ("startup-suite-platform", "platform")
     names = [e["name"] if isinstance(e, dict) else e for e in manifest.requires_env]
-    assert names == ["SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN"]
-    token_entry = next(e for e in manifest.requires_env if e["name"] == "SUITE_RUNTIME_TOKEN")
-    assert token_entry["password"] is True
+    # The token itself is not a required env setting (README "Security notes").
+    assert names == ["SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN_FILE"]
+    raw = yaml.safe_load((ROOT / "plugin.yaml").read_text())
+    legacy = next(e for e in raw["optional_env"] if e["name"] == "SUITE_RUNTIME_TOKEN")
+    assert legacy["password"] is True and legacy["secret"] is True
 
     manager = PluginManager()
     module = manager._load_directory_module(manifest)
@@ -48,7 +50,7 @@ def test_install_prompt_masks_the_token(monkeypatch, tmp_path):
     from hermes_cli import plugins_cmd, plugins_cmd_install
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    for name in ("SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN"):
+    for name in ("SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN_FILE"):
         monkeypatch.delenv(name, raising=False)
     readers: dict[str, str] = {}
 
@@ -69,8 +71,10 @@ def test_install_prompt_masks_the_token(monkeypatch, tmp_path):
             pass
 
     plugins_cmd_install._prompt_plugin_env_vars(manifest, Console())
+    # No required entry is a secret any more, so none is prompted for as one;
+    # the token never reaches this prompt (install.sh writes the file first).
     assert readers == {
         "SUITE_URL": "echoed",
         "SUITE_RUNTIME_ID": "echoed",
-        "SUITE_RUNTIME_TOKEN": "masked",
+        "SUITE_RUNTIME_TOKEN_FILE": "echoed",
     }

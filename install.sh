@@ -15,14 +15,24 @@
 #   3. a no-echo prompt on the controlling terminal.
 #
 # What it changes, and nothing else (uninstall.sh reverses exactly this):
-#   - $HERMES_HOME/.env: SUITE_URL, SUITE_RUNTIME_ID, SUITE_RUNTIME_TOKEN
-#     (plus SUITE_ALLOW_ALL_USERS / SUITE_ALLOWED_USERS when asked); mode 0600.
+#   - $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token: the token,
+#     mode 0600. NOT .env: Hermes copies .env into the gateway's os.environ on
+#     every turn, and children it spawns without a scrub inherit that (README,
+#     "Security notes"). mcp-tokens/ is the directory Hermes's own file tools
+#     and media delivery refuse to read.
+#   - $HERMES_HOME/.env: SUITE_URL, SUITE_RUNTIME_ID, SUITE_RUNTIME_TOKEN_FILE
+#     (the path above; plus SUITE_ALLOW_ALL_USERS / SUITE_ALLOWED_USERS when
+#     asked); mode 0600. A SUITE_RUNTIME_TOKEN line from an older install is
+#     removed.
 #   - the plugin `startup-suite-platform`, installed and enabled through
 #     `hermes plugins install` + `hermes plugins enable`;
-#   - config.yaml `mcp_servers.startup-suite`: url https://<host>/mcp and
-#     header `Authorization: Bearer ${SUITE_RUNTIME_TOKEN}` (the placeholder,
-#     resolved by Hermes at connect time; the token itself never enters
-#     config.yaml).
+#   - config.yaml `mcp_servers.startup-suite`: a stdio server running the
+#     plugin's hermes_suite_channel/mcp_bridge.py, which relays to
+#     https://<host>/mcp and reads the token from the file itself, so neither
+#     config.yaml nor any environment holds it;
+#   - $HERMES_HOME/.suite-channel/: the install record uninstall.sh uses to
+#     give config.yaml back byte for byte (a 0600 copy of config.yaml as it
+#     was before the first install, and which directories this created).
 #
 # Idempotent: a second run with the same arguments changes no file.
 # The last line printed on success is exactly `hermes-suite-channel: installed`.
@@ -31,6 +41,8 @@ set -euo pipefail
 
 readonly PLUGIN_NAME="startup-suite-platform"
 readonly MCP_NAME="startup-suite"
+readonly TOKEN_RELPATH="mcp-tokens/startup-suite-platform.runtime-token"
+readonly RECORD_RELDIR=".suite-channel"
 readonly DEFAULT_REPO="https://github.com/Startup-Suite/hermes-suite-channel.git"
 readonly RESULT_LINE="hermes-suite-channel: installed"
 
@@ -217,6 +229,21 @@ env_set() {
   [ "$changed" = 0 ] || write_env "$out"
 }
 
+# Remove every line defining KEY. Bash builtins only.
+env_unset() {
+  local key="$1" line out="" removed=0
+  local re="^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*="
+  [ -f "$ENV_FILE" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ $re ]]; then
+      removed=1
+    else
+      out+="$line"$'\n'
+    fi
+  done <"$ENV_FILE"
+  [ "$removed" = 0 ] || write_env "$out"
+}
+
 write_env() {
   local content="$1" tmp
   tmp="$(umask 077 && mktemp "${ENV_FILE%/*}/.env_hsc.XXXXXX")"
@@ -224,6 +251,135 @@ write_env() {
   chmod 600 "$tmp"
   mv -f "$tmp" "$ENV_FILE"
   ENV_CHANGED=1
+}
+
+# ------------------------------------------------------------ token file
+
+TOKEN_PATH=""
+
+# Write $TOKEN to $TOKEN_PATH (0600) unless the file already holds exactly
+# that. The comparison is `cmp` on two files, so the stored token is never
+# read into this shell or handed to a child on argv or stdout.
+store_token() {
+  local dir tmp
+  dir="${TOKEN_PATH%/*}"
+  if [ ! -d "$dir" ]; then
+    (umask 077 && mkdir -p "$dir")
+  fi
+  tmp="$(umask 077 && mktemp "$dir/.hsc-token.XXXXXX")"
+  printf '%s\n' "$TOKEN" >"$tmp"
+  chmod 600 "$tmp"
+  if [ -f "$TOKEN_PATH" ] && cmp -s "$tmp" "$TOKEN_PATH"; then
+    rm -f "$tmp"
+    return
+  fi
+  mv -f "$tmp" "$TOKEN_PATH"
+  log "wrote the runtime token to $TOKEN_PATH (mode 0600)"
+}
+
+# ------------------------------------------------------------------ python
+
+# The interpreter Hermes itself runs on (its console script's shebang). It
+# has ruamel.yaml, which Hermes needs to read config.yaml, and it runs the
+# MCP bridge (standard library only). Falls back to python3 on PATH.
+HPY=""
+find_hermes_python() {
+  local bin line="" interp="" words=()
+  bin="$(command -v "$HERMES_BIN")"
+  if [ -f "$bin" ]; then
+    IFS= read -r line <"$bin" || true
+  fi
+  if [[ "$line" == '#!'* ]]; then
+    read -r -a words <<<"${line#??}"
+    if [ "${#words[@]}" -gt 0 ]; then
+      interp="${words[0]}"
+      if [ "${interp##*/}" = env ] && [ "${#words[@]}" -gt 1 ]; then
+        interp="$(command -v "${words[1]}" || true)"
+      fi
+    fi
+  fi
+  if [ -z "$interp" ] || [ ! -x "$interp" ]; then
+    interp="$(command -v python3 || true)"
+  fi
+  [ -n "$interp" ] || die "no python3 found (needed for the MCP bridge and to read config.yaml)"
+  "$interp" -c 'import sys; sys.exit(sys.version_info < (3, 8))' ||
+    die "$interp is older than Python 3.8"
+  HPY="$interp"
+}
+
+# Read-only questions about config.yaml, answered from the RAW YAML: never
+# `hermes config get --raw`, which expands ${VAR} placeholders from the
+# environment. Exit 0 = yes, 1 = no, 4 = no YAML library or unparseable.
+#   is KEY VALUE   the dotted KEY holds VALUE (a string, or a JSON list)
+#   has KEY        the dotted KEY is set
+#   json ARG...    print ARG... as a JSON list (reads no config)
+yaml_q() {
+  "$HPY" - "$HERMES_HOME/config.yaml" "$@" <<'PYEOF'
+import json, sys
+path, op, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+if op == "json":
+    print(json.dumps(args))
+    sys.exit(0)
+try:
+    from ruamel.yaml import YAML
+
+    def load(text):
+        return YAML(typ="safe", pure=True).load(text)
+except ImportError:
+    try:
+        import yaml
+
+        load = yaml.safe_load
+    except ImportError:
+        sys.exit(4)
+try:
+    with open(path, encoding="utf-8") as f:
+        data = load(f.read())
+except FileNotFoundError:
+    data = None
+except Exception:
+    sys.exit(4)
+node = data
+for part in args[0].split("."):
+    if not isinstance(node, dict) or part not in node:
+        sys.exit(1)
+    node = node[part]
+if op == "has":
+    sys.exit(0)
+want = args[1]
+if isinstance(node, list):
+    try:
+        sys.exit(0 if node == json.loads(want) else 1)
+    except ValueError:
+        sys.exit(1)
+sys.exit(0 if isinstance(node, str) and node == want else 1)
+PYEOF
+}
+
+# ---------------------------------------------------------- install record
+
+# Written once, before the first install touches anything, and kept until
+# uninstall.sh: a 0600 copy of config.yaml as it was, and which directories
+# did not exist yet. An install over an older one that left no record says
+# so (pre_install_known=0), and uninstall then removes only its own keys.
+write_install_record() {
+  local dir="$HERMES_HOME/$RECORD_RELDIR" known=1 existed=0 tokdir=0
+  [ ! -f "$dir/record" ] || return 0
+  if [ -e "$(plugin_dir)" ] || yaml_q has "mcp_servers.$MCP_NAME"; then
+    known=0
+  fi
+  (umask 077 && mkdir -p "$dir")
+  if [ -f "$HERMES_HOME/config.yaml" ]; then
+    existed=1
+    (umask 077 && cp "$HERMES_HOME/config.yaml" "$dir/config.yaml.pre-install")
+    chmod 600 "$dir/config.yaml.pre-install"
+  fi
+  [ ! -d "$HERMES_HOME/mcp-tokens" ] || tokdir=1
+  (
+    umask 077
+    printf 'pre_install_known=%s\nconfig_existed=%s\nmcp_tokens_existed=%s\n' \
+      "$known" "$existed" "$tokdir" >"$dir/record"
+  )
 }
 
 # ------------------------------------------------------------------ hermes
@@ -382,23 +538,38 @@ install_plugin() {
   fi
 }
 
-config_get() { run_hermes config get "$1" --raw 2>/dev/null || true; }
-
+# Set KEY to VALUE unless the raw YAML already holds it. VALUE is a string or
+# a JSON list (the form `hermes config set` coerces to a list).
+YAML_UNKNOWN_SAID=0
 config_set_if_changed() {
-  local key="$1" value="$2"
-  if [ "$(config_get "$key")" = "$value" ]; then
-    return
+  local key="$1" value="$2" rc=0
+  yaml_q is "$key" "$value" || rc=$?
+  [ "$rc" != 0 ] || return 0
+  if [ "$rc" = 4 ] && [ "$YAML_UNKNOWN_SAID" = 0 ]; then
+    YAML_UNKNOWN_SAID=1
+    log "warning: $HPY cannot parse config.yaml (no YAML library?); setting every MCP key"
   fi
   run_hermes config set "$key" "$value" >&2 || die "hermes config set $key failed"
 }
 
+config_unset_if_set() {
+  yaml_q has "$1" || return 0
+  run_hermes config unset "$1" >&2 || die "hermes config unset $1 failed"
+}
+
 register_mcp() {
-  # The header value is the literal text `Bearer ${SUITE_RUNTIME_TOKEN}`:
-  # Hermes resolves ${VAR} from the environment (.env included) at connect
-  # time, so config.yaml never holds the token.
-  local header='Bearer ${SUITE_RUNTIME_TOKEN}'
-  config_set_if_changed "mcp_servers.$MCP_NAME.url" "$MCP_URL"
-  config_set_if_changed "mcp_servers.$MCP_NAME.headers.Authorization" "$header"
+  # A stdio server: Hermes spawns the bridge with a filtered environment and
+  # the bridge reads the token from the file, so no environment and no
+  # config.yaml value holds it. The http form an older install wrote (url
+  # plus an Authorization header interpolating ${SUITE_RUNTIME_TOKEN}) is
+  # removed: it works only with the token in os.environ.
+  local args
+  config_unset_if_set "mcp_servers.$MCP_NAME.url"
+  config_unset_if_set "mcp_servers.$MCP_NAME.headers"
+  args="$(yaml_q json "$(plugin_dir)/hermes_suite_channel/mcp_bridge.py" \
+    --url "$MCP_URL" --token-file "$TOKEN_PATH")"
+  config_set_if_changed "mcp_servers.$MCP_NAME.command" "$HPY"
+  config_set_if_changed "mcp_servers.$MCP_NAME.args" "$args"
 }
 
 # -------------------------------------------------------------------- main
@@ -426,15 +597,22 @@ main() {
 
   mkdir -p "$HERMES_HOME"
   ENV_FILE="$HERMES_HOME/.env"
+  TOKEN_PATH="$HERMES_HOME/$TOKEN_RELPATH"
+  check_env_value SUITE_RUNTIME_TOKEN_FILE "$TOKEN_PATH"
 
+  find_hermes_python
   resolve_source
+  write_install_record
+
+  store_token
+  TOKEN=""
 
   # The env keys go in first: `hermes plugins install` prompts for any
   # requires_env variable that is still unset.
   env_set SUITE_URL "$SUITE_URL_ARG"
   env_set SUITE_RUNTIME_ID "$RUNTIME_ID_ARG"
-  env_set SUITE_RUNTIME_TOKEN "$TOKEN"
-  TOKEN=""
+  env_set SUITE_RUNTIME_TOKEN_FILE "$TOKEN_PATH"
+  env_unset SUITE_RUNTIME_TOKEN
   [ -z "$ALLOW_ALL" ] || env_set SUITE_ALLOW_ALL_USERS "$ALLOW_ALL"
   [ -z "$ALLOWED_USERS" ] || env_set SUITE_ALLOWED_USERS "$ALLOWED_USERS"
   [ "$ENV_CHANGED" = 0 ] || log "wrote Suite settings to $ENV_FILE (mode 0600)"

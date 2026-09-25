@@ -17,16 +17,22 @@ requires_env:
     description: "The federated runtime id registered for this agent in Suite"
     prompt: "Suite runtime id"
     password: false
+  # The token is NOT an env setting: a value in $HERMES_HOME/.env is copied
+  # into the gateway's os.environ on every turn and inherited by children
+  # spawned without a scrub. install.sh writes it to a 0600 file under
+  # $HERMES_HOME/mcp-tokens/ and puts only the path here.
+  - name: SUITE_RUNTIME_TOKEN_FILE
+    description: "Path of the 0600 file holding the Suite runtime token (install.sh writes it)"
+    prompt: "Suite runtime token file"
+    password: false
+optional_env:
   - name: SUITE_RUNTIME_TOKEN
-    description: "The runtime token Suite issued for that runtime id"
-    prompt: "Suite runtime token"
-    # `password` masks it in `hermes config`; `secret` masks the prompt that
-    # `hermes plugins install` shows for an unset requires_env variable
-    # (hermes_cli/plugins_cmd_install.py _prompt_plugin_env_vars). Without
-    # `secret` that prompt echoes the token.
+    description: "LEGACY: the runtime token itself. Kept out of os.environ only when it is exported by the launcher; in .env Hermes re-copies it every turn. Use SUITE_RUNTIME_TOKEN_FILE."
+    prompt: "Suite runtime token (legacy; prefer the token file)"
+    # `password` masks it in `hermes config`; `secret` masks any prompt for it
+    # (hermes_cli/plugins_cmd_install.py _prompt_plugin_env_vars).
     password: true
     secret: true
-optional_env:
   - name: SUITE_ALLOWED_USERS
     description: "Comma-separated Suite display names allowed to drive the agent (suite-system covers task dispatches)"
     prompt: "Allowed Suite users (comma-separated)"

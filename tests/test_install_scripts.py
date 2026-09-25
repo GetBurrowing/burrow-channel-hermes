@@ -20,9 +20,11 @@ import secrets
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 STUB_DIR = Path(__file__).resolve().parent / "stub_hermes"
@@ -34,6 +36,7 @@ UPDATED = "hermes-suite-channel: updated"
 
 PRE_CONFIG = "# user config, hand written\nmodel:\n  default: qwen3.5-9b  # trailing comment\n"
 PRE_ENV = 'OPENAI_API_KEY=dummy-not-a-key\nexport FOO="bar baz"\n# a comment line\n'
+TOKEN_REL = "mcp-tokens/startup-suite-platform.runtime-token"
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -91,7 +94,10 @@ def home(tmp_path) -> Path:
 def env(tmp_path, home) -> dict:
     return {
         **os.environ,
-        "PATH": f"{STUB_DIR}{os.pathsep}{os.environ['PATH']}",
+        # The stub runs on `python3`: this interpreter, which has ruamel.yaml.
+        "PATH": os.pathsep.join(
+            [str(STUB_DIR), str(Path(sys.executable).parent), os.environ["PATH"]]
+        ),
         "HERMES_HOME": str(home),
         "HERMES_STUB_LOG": str(tmp_path / "stub-argv.jsonl"),
     }
@@ -146,6 +152,23 @@ def last_line(proc) -> str:
     return lines[-1] if lines else ""
 
 
+def sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def config(home: Path) -> dict:
+    return yaml.safe_load((home / "config.yaml").read_text()) or {}
+
+
+def token_path(home: Path) -> Path:
+    return home / TOKEN_REL
+
+
+def set_lines(proc) -> list[str]:
+    """The `Set <key>` lines `hermes config set` prints (stub and real CLI)."""
+    return [ln for ln in proc.stderr.splitlines() if "Set " in ln]
+
+
 # ------------------------------------------------------------------ install
 
 
@@ -159,9 +182,13 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
     assert env_text[len(PRE_ENV) :] == (
         "SUITE_URL=wss://suite.example.test/runtime/ws\n"
         "SUITE_RUNTIME_ID=rt-01a0d6c5\n"
-        f"SUITE_RUNTIME_TOKEN={token}\n"
+        f"SUITE_RUNTIME_TOKEN_FILE={token_path(home)}\n"
     )
+    assert token not in env_text
     assert stat.S_IMODE((home / ".env").stat().st_mode) == 0o600
+    assert token_path(home).read_text() == token + "\n"
+    assert stat.S_IMODE(token_path(home).stat().st_mode) == 0o600
+    assert stat.S_IMODE(token_path(home).parent.stat().st_mode) == 0o700
 
     plugin = home / "plugins" / "startup-suite-platform"
     assert (plugin / "plugin.yaml").is_file()
@@ -170,15 +197,21 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
         f'BUILD = "{sha}"'
     ) == 1
 
-    cfg = (home / "config.yaml").read_text()
-    assert cfg.startswith(PRE_CONFIG)
-    assert '# hermes-stub: mcp_servers.startup-suite.url = "https://suite.example.test/mcp"' in cfg
-    assert (
-        "# hermes-stub: mcp_servers.startup-suite.headers.Authorization = "
-        '"Bearer ${SUITE_RUNTIME_TOKEN}"' in cfg
-    )
-    assert '# hermes-stub: plugins.enabled = ["startup-suite-platform"]' in cfg
-    assert token not in cfg
+    cfg_text = (home / "config.yaml").read_text()
+    assert cfg_text.startswith(PRE_CONFIG)
+    assert token not in cfg_text
+    cfg = config(home)
+    assert cfg["mcp_servers"]["startup-suite"] == {
+        "command": sys.executable,
+        "args": [
+            str(plugin / "hermes_suite_channel" / "mcp_bridge.py"),
+            "--url",
+            "https://suite.example.test/mcp",
+            "--token-file",
+            str(token_path(home)),
+        ],
+    }
+    assert cfg["plugins"]["enabled"] == ["startup-suite-platform"]
 
     calls = stub_calls(env)
     assert ["plugins", "enable", "startup-suite-platform"] in calls
@@ -201,12 +234,49 @@ def test_second_install_changes_nothing(checkout, home, env, token):
     assert again.returncode == 0, again.stderr
     assert last_line(again) == INSTALLED
     assert snapshot(home) == before
+    assert set_lines(again) == []
     mutating = [
         c
         for c in stub_calls(env)[n_calls:]
-        if c[:2] in (["plugins", "install"], ["plugins", "enable"], ["config", "set"])
+        if c[:2]
+        in (["plugins", "install"], ["plugins", "enable"], ["config", "set"], ["config", "unset"])
     ]
     assert mutating == []
+
+
+def _raw_gets(env) -> list[list[str]]:
+    """`hermes config get` calls that could return an expanded value: any
+    `--raw`, and any read of the MCP entry."""
+    return [
+        c
+        for c in stub_calls(env)
+        if c[:2] == ["config", "get"] and ("--raw" in c or c[2].startswith("mcp_servers"))
+    ]
+
+
+def test_config_is_never_read_back_through_hermes(checkout, home, env, token):
+    """`hermes config get --raw` EXPANDS ${VAR} from the environment, so an
+    installer comparing against it pulls expanded values through a child's
+    stdout into shell. install.sh compares the raw YAML instead."""
+    for _ in range(2):
+        assert install(checkout, home, env, token).returncode == 0
+    assert run(checkout / "update.sh", "--hermes-home", str(home), env=env).returncode == 0
+    assert run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env).returncode == 0
+    assert stub_calls(env), "the stub recorded no calls, so the check cannot fire"
+    assert _raw_gets(env) == []
+
+
+def test_raw_get_check_fires_on_an_installer_that_reads_back(tmp_path, home, env, token):
+    """Positive control for the check above."""
+    src = (ROOT / "install.sh").read_text()
+    anchor = '  local key="$1" value="$2" rc=0\n'
+    assert anchor in src
+    leaky = src.replace(
+        anchor, anchor + '  run_hermes config get "$key" --raw >/dev/null || true\n'
+    )
+    co = _make_checkout(tmp_path / "leaky", install_sh=leaky)
+    assert install(co, home, env, token).returncode == 0
+    assert _raw_gets(env) != []
 
 
 def test_round_trip_restores_every_preexisting_byte(checkout, home, env, token):
@@ -220,8 +290,11 @@ def test_round_trip_restores_every_preexisting_byte(checkout, home, env, token):
 
     after = snapshot(home)
     assert {k: after.get(k) for k in before} == before
+    assert sha(home / "config.yaml") == hashlib.sha256(PRE_CONFIG.encode()).hexdigest()
     assert not (home / "plugins" / "startup-suite-platform").exists()
     assert set(after) - set(before) == set()
+    assert not (home / "mcp-tokens").exists()
+    assert not (home / ".suite-channel").exists()
 
     again = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env)
     assert again.returncode == 0 and last_line(again) == UNINSTALLED
@@ -258,7 +331,8 @@ def test_token_from_token_file(checkout, home, env, token, tmp_path):
     tf.write_text(token + "\n")
     proc = install(checkout, home, env, "", "--token-file", str(tf))
     assert proc.returncode == 0, proc.stderr
-    assert f"SUITE_RUNTIME_TOKEN={token}\n" in (home / ".env").read_text()
+    assert token_path(home).read_text() == token + "\n"
+    assert token not in (home / ".env").read_text()
 
 
 def test_piped_script_does_not_read_the_token_from_stdin(checkout, home, env, token, tmp_path):
@@ -272,6 +346,7 @@ def test_piped_script_does_not_read_the_token_from_stdin(checkout, home, env, to
     assert proc.returncode != 0
     assert "no token" in proc.stderr
     assert "SUITE_RUNTIME_TOKEN" not in (home / ".env").read_text()
+    assert not token_path(home).exists()
 
     tf = tmp_path / "tok"
     tf.write_text(token)
@@ -281,7 +356,7 @@ def test_piped_script_does_not_read_the_token_from_stdin(checkout, home, env, to
         **kw,
     )
     assert ok.returncode == 0, ok.stderr
-    assert f"SUITE_RUNTIME_TOKEN={token}\n" in (home / ".env").read_text()
+    assert token_path(home).read_text() == token + "\n"
 
 
 def test_empty_token_is_refused(checkout, home, env):
@@ -306,7 +381,7 @@ def test_argv_check_fires_on_a_token_leaking_installer(tmp_path, home, env, toke
     """Positive control: the same check must go red for an installer that
     hands the token to `hermes config set` on argv."""
     src = (ROOT / "install.sh").read_text()
-    anchor = '  env_set SUITE_RUNTIME_TOKEN "$TOKEN"\n'
+    anchor = "  store_token\n"
     assert anchor in src
     leaking = src.replace(anchor, anchor + '  hermes config set SUITE_RUNTIME_TOKEN "$TOKEN" >&2\n')
     co = _make_checkout(tmp_path / "leaky", install_sh=leaking)
@@ -439,3 +514,131 @@ def test_update_moves_the_plugin_and_keeps_the_config(checkout, home, env, token
 def test_update_refuses_when_not_installed(checkout, home, env):
     proc = run(checkout / "update.sh", "--hermes-home", str(home), env=env)
     assert proc.returncode != 0 and "run install.sh first" in proc.stderr
+
+
+# ----------------------------------------------------- config.yaml round trip
+
+
+def _uninstall(checkout, home, env):
+    proc = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == UNINSTALLED
+    return proc
+
+
+def test_bookkeeping_keys_hermes_adds_are_removed(checkout, home, env, token):
+    """The stub mirrors the real CLI: after `plugins remove` config.yaml holds
+    `plugins: {enabled: [], disabled: []}` and `_config_version: 46`. The
+    uninstall must take both away when they were not there before."""
+    pre = sha(home / "config.yaml")
+    assert install(checkout, home, env, token).returncode == 0
+    un = _uninstall(checkout, home, env)
+    assert sha(home / "config.yaml") == pre
+    assert "restored byte for byte" in un.stderr
+
+
+def test_bookkeeping_check_fires_without_the_cleanup(tmp_path, home, env, token):
+    """Positive control: an uninstaller with step 3 removed leaves the
+    Hermes-written lines, and the sha comparison sees it."""
+    src = (ROOT / "uninstall.sh").read_text()
+    start = src.index('if [ -f "$RECORD_DIR/record" ]; then\n  "$HPY" -')
+    end = src.index("PYEOF\nfi\n", start) + len("PYEOF\nfi\n")
+    co = _make_checkout(tmp_path / "nocleanup")
+    (co / "uninstall.sh").write_text(src[:start] + src[end:])
+    pre = sha(home / "config.yaml")
+    assert install(co, home, env, token).returncode == 0
+    _uninstall(co, home, env)
+    assert sha(home / "config.yaml") != pre
+    assert "_config_version" in (home / "config.yaml").read_text()
+
+
+def test_an_edited_config_keeps_the_edit_and_loses_only_the_bookkeeping(checkout, home, env, token):
+    assert install(checkout, home, env, token).returncode == 0
+    with (home / "config.yaml").open("a") as f:
+        f.write("user_added: true  # edited after install\n")
+    un = _uninstall(checkout, home, env)
+    text = (home / "config.yaml").read_text()
+    assert text.startswith(PRE_CONFIG)
+    assert "user_added: true  # edited after install" in text
+    assert "_config_version" not in text and "plugins" not in text
+    assert "was edited after the install" in un.stderr
+    assert config(home) == {"model": {"default": "qwen3.5-9b"}, "user_added": True}
+
+
+def test_a_config_that_did_not_exist_is_removed_again(checkout, home, env, token):
+    (home / "config.yaml").unlink()
+    assert install(checkout, home, env, token).returncode == 0
+    assert (home / "config.yaml").exists()
+    _uninstall(checkout, home, env)
+    assert not (home / "config.yaml").exists()
+
+
+def test_a_preexisting_plugins_block_survives_byte_for_byte(checkout, home, env, token):
+    original = PRE_CONFIG + "plugins:\n  enabled:\n    - some-other-plugin\n"
+    (home / "config.yaml").write_text(original)
+    assert install(checkout, home, env, token).returncode == 0
+    assert config(home)["plugins"]["enabled"] == ["some-other-plugin", "startup-suite-platform"]
+    _uninstall(checkout, home, env)
+    assert (home / "config.yaml").read_text() == original
+
+
+def test_install_over_a_legacy_install_migrates_the_token_and_mcp_entry(checkout, home, env, token):
+    """A stage-4 install: the token in .env, an http MCP entry interpolating
+    ${SUITE_RUNTIME_TOKEN}. Reinstalling moves both to the token-file form."""
+    (home / ".env").write_text(PRE_ENV + f"SUITE_RUNTIME_TOKEN={token}\n")
+    (home / "config.yaml").write_text(
+        PRE_CONFIG
+        + "mcp_servers:\n  startup-suite:\n    url: https://suite.example.test/mcp\n"
+        + "    headers:\n      Authorization: Bearer ${SUITE_RUNTIME_TOKEN}\n"
+    )
+    proc = install(checkout, home, env, token)
+    assert proc.returncode == 0, proc.stderr
+    assert "SUITE_RUNTIME_TOKEN=" not in (home / ".env").read_text()
+    entry = config(home)["mcp_servers"]["startup-suite"]
+    assert set(entry) == {"command", "args"}
+    assert "SUITE_RUNTIME_TOKEN" not in (home / "config.yaml").read_text()
+    assert (home / ".suite-channel" / "record").read_text().startswith("pre_install_known=0\n")
+    _uninstall(checkout, home, env)
+    assert "startup-suite" not in (home / "config.yaml").read_text()
+
+
+def test_find_hermes_python_is_the_same_code_in_both_scripts():
+    def body(name):
+        src = (ROOT / name).read_text()
+        start = src.index("find_hermes_python() {")
+        return src[start : src.index("\n}\n", start)]
+
+    assert body("install.sh") == body("uninstall.sh")
+
+
+# --------------------------------------------------------- the REAL hermes
+
+REAL_HERMES = os.environ.get("HERMES_REAL_BIN")
+
+
+@pytest.mark.skipif(not REAL_HERMES, reason="HERMES_REAL_BIN (a real hermes executable) not set")
+def test_round_trip_with_the_real_hermes_cli(checkout, tmp_path, token):
+    """Same round trip against hermes-agent itself (fdec926e in the recorded
+    run): config.yaml returns to its original sha256 after install, reinstall
+    and uninstall, and the reinstall sets nothing."""
+    home = tmp_path / "real-home"
+    home.mkdir()
+    (home / "config.yaml").write_text(PRE_CONFIG)
+    (home / ".env").write_text(PRE_ENV)
+    pre_cfg, pre_env = sha(home / "config.yaml"), sha(home / ".env")
+    env = {
+        **os.environ,
+        "PATH": f"{Path(REAL_HERMES).parent}{os.pathsep}{os.environ['PATH']}",
+        "HERMES_HOME": str(home),
+    }
+    first = install(checkout, home, env, token)
+    assert first.returncode == 0, first.stderr
+    assert token not in (home / "config.yaml").read_text() + (home / ".env").read_text()
+    second = install(checkout, home, env, token)
+    assert second.returncode == 0, second.stderr
+    assert set_lines(second) == []
+    un = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env)
+    assert un.returncode == 0, un.stderr
+    assert sha(home / "config.yaml") == pre_cfg, (home / "config.yaml").read_text()
+    assert sha(home / ".env") == pre_env
+    assert not token_path(home).exists() and not (home / ".suite-channel").exists()
