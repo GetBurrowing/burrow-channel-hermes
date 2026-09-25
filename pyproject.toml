@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-suite-channel"
+version = "0.1.0"
+description = "Hermes Agent platform plugin for Startup Suite federation"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+# hermes-agent pyproject.toml: requires-python = ">=3.11,<3.15".
+requires-python = ">=3.11"
+# The plugin's OWN runtime dependency. hermes-agent pins websockets==15.0.1
+# only for python_version >= '3.14', so on 3.11-3.13 it may be absent.
+# Hermes PM reads [project].dependencies of a directory plugin and installs
+# them before enabling it (website/docs/developer-guide/plugins/index.md,
+# "Lazy-install optional Python dependencies"). Not vendored.
+dependencies = ["websockets>=15.0.1,<16"]
+
+[project.optional-dependencies]
+# ruamel.yaml + pyyaml: the only third-party imports hermes-agent's gateway
+# modules need at import time (measured at fdec926e). The adapter tests run
+# against the REAL gateway, from a checkout named by HERMES_AGENT_SRC.
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "ruamel.yaml", "pyyaml"]
+
+[tool.setuptools]
+packages = ["hermes_suite_channel"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

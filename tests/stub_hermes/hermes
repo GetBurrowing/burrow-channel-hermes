@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""A stand-in `hermes` for tests/test_install_scripts.py.
+
+It implements the handful of subcommands install.sh / uninstall.sh /
+update.sh call, with the same argument shapes as the real CLI at hermes-agent
+fdec926e (`plugins install|enable|disable|remove`, `config get|set|unset`),
+and it records its argv, one JSON line per call, to $HERMES_STUB_LOG. That
+log is what the no-token-on-argv test reads.
+
+State lives in $HERMES_HOME/config.yaml as real YAML, read and written with
+ruamel.yaml round-trip (comments and layout survive, as they do under the
+real CLI, whose writer is also ruamel), and in
+$HERMES_HOME/plugins/.install-metadata.json like the real CLI.
+
+Faithful to the real CLI at fdec926e where install.sh / uninstall.sh depend
+on it (measured against it, see README): `plugins enable` writes
+`plugins: {enabled: [..], disabled: []}`, `plugins remove` leaves
+`enabled: []` behind and stamps `_config_version: 46`, `config unset` prunes
+parents it leaves empty, `config set` coerces a JSON list value to a list.
+
+HERMES_STUB_FAIL_INSTALL=1 makes `plugins install` fail (the copy-fallback test).
+HERMES_STUB_SCAN=caution|dangerous makes `plugins install` print the real CLI's
+scan verdict line and refuse, as the real CLI does non-interactively; --force
+overrides caution, never dangerous (tools/plugin_guard.py).
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG_VERSION = 46
+
+
+def home() -> Path:
+    return Path(os.environ["HERMES_HOME"])
+
+
+def log_argv() -> None:
+    path = os.environ.get("HERMES_STUB_LOG")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"argv": sys.argv, "stdin_isatty": os.isatty(0)}) + "\n")
+
+
+def _yaml():
+    from ruamel.yaml import YAML
+
+    y = YAML()
+    y.indent(mapping=2, sequence=4, offset=2)
+    return y
+
+
+def read_config():
+    from ruamel.yaml.comments import CommentedMap
+
+    cfg = home() / "config.yaml"
+    if not cfg.exists():
+        return CommentedMap()
+    data = _yaml().load(cfg.read_text(encoding="utf-8"))
+    return data if data is not None else CommentedMap()
+
+
+def write_config(data) -> None:
+    import io
+
+    buf = io.StringIO()
+    _yaml().dump(data, buf)
+    (home() / "config.yaml").write_text(buf.getvalue(), encoding="utf-8")
+
+
+def lookup(data, key: str):
+    node = data
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            raise KeyError(key)
+        node = node[part]
+    return node
+
+
+def assign(data, key: str, value) -> None:
+    from ruamel.yaml.comments import CommentedMap
+
+    parts = key.split(".")
+    node = data
+    for part in parts[:-1]:
+        if not isinstance(node.get(part), dict):
+            node[part] = CommentedMap()
+        node = node[part]
+    node[parts[-1]] = value
+
+
+def remove(data, key: str) -> bool:
+    parts = key.split(".")
+    chain = [data]
+    for part in parts[:-1]:
+        nxt = chain[-1].get(part) if isinstance(chain[-1], dict) else None
+        if not isinstance(nxt, dict):
+            return False
+        chain.append(nxt)
+    if parts[-1] not in chain[-1]:
+        return False
+    del chain[-1][parts[-1]]
+    for depth in range(len(chain) - 1, 0, -1):  # prune parents left empty
+        if not chain[depth]:
+            del chain[depth - 1][parts[depth - 1]]
+    return True
+
+
+def coerce(value: str):
+    if value.startswith("[") or value.startswith("{"):
+        try:
+            return json.loads(value)
+        except ValueError:
+            pass
+    return value
+
+
+def metadata() -> dict:
+    p = home() / "plugins" / ".install-metadata.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def save_metadata(meta: dict) -> None:
+    p = home() / "plugins" / ".install-metadata.json"
+    if meta:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(meta, sort_keys=True))
+    elif p.exists():
+        p.unlink()
+
+
+def fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def plugins(args: list[str]) -> None:
+    verb, rest = args[0], args[1:]
+    data = read_config()
+    try:
+        enabled = list(lookup(data, "plugins.enabled"))
+    except KeyError:
+        enabled = []
+    if verb == "install":
+        src = rest[0]
+        ref = rest[rest.index("--ref") + 1] if "--ref" in rest else "HEAD"
+        if os.environ.get("HERMES_STUB_FAIL_INSTALL") == "1":
+            fail("Error: stub told to refuse this install")
+        scan = os.environ.get("HERMES_STUB_SCAN")
+        if scan == "dangerous":
+            fail("Scan: plugin (stub)  Verdict: DANGEROUS\nBlocked (dangerous verdict).")
+        if scan == "caution" and "--force" not in rest:
+            fail("Scan: plugin (stub)  Verdict: CAUTION\nBlocked. Use --force to override.")
+        if not src.startswith("file://"):
+            fail(f"Error: stub cannot fetch {src}")
+        repo = src[len("file://") :]
+        name = "startup-suite-platform"
+        target = home() / "plugins" / name
+        if target.exists() and "--force" not in rest:
+            fail(f"Plugin '{name}' already exists.")
+        subprocess.run(["rm", "-rf", str(target)], check=True)
+        target.mkdir(parents=True)
+        archive = subprocess.run(
+            ["git", "-C", repo, "archive", ref], check=True, capture_output=True
+        ).stdout
+        subprocess.run(["tar", "-x", "-C", str(target)], input=archive, check=True)
+        meta = metadata()
+        meta[name] = {"source": src, "revision": ref, "pinned": "--ref" in rest}
+        save_metadata(meta)
+        print(f"Plugin installed: {src}")
+    elif verb == "enable":
+        if rest[0] not in enabled:
+            assign(data, "plugins.enabled", enabled + [rest[0]])
+            if "disabled" not in data["plugins"]:
+                data["plugins"]["disabled"] = []
+            write_config(data)
+    elif verb == "disable":
+        if rest[0] in enabled:
+            assign(data, "plugins.enabled", [n for n in enabled if n != rest[0]])
+            data["_config_version"] = CONFIG_VERSION
+            write_config(data)
+    elif verb == "remove":
+        meta = metadata()
+        if rest[0] not in meta:
+            fail(f"Plugin '{rest[0]}' has no install record")
+        subprocess.run(["rm", "-rf", str(home() / "plugins" / rest[0])], check=True)
+        del meta[rest[0]]
+        save_metadata(meta)
+        plugins(["disable", rest[0]])
+    else:
+        fail(f"stub: unsupported plugins verb {verb}")
+
+
+def config(args: list[str]) -> None:
+    verb, rest = args[0], args[1:]
+    data = read_config()
+    if verb == "get":
+        key = rest[0]
+        try:
+            value = lookup(data, key)
+        except KeyError:
+            print(f"Config key not set: {key}")
+            sys.exit(1)
+        if "--json" in rest:
+            print(json.dumps(value))
+        else:
+            # --raw (and plain get) EXPANDS ${VAR} from the environment, as the
+            # real CLI does: that is why install.sh must never call it.
+            print(os.path.expandvars(value) if isinstance(value, str) else value)
+    elif verb == "set":
+        assign(data, rest[0], coerce(rest[1]))
+        write_config(data)
+        print(f"Set {rest[0]}")
+    elif verb == "unset":
+        if not remove(data, rest[0]):
+            fail(f"Config key not set: {rest[0]}")
+        write_config(data)
+    else:
+        fail(f"stub: unsupported config verb {verb}")
+
+
+def main() -> None:
+    log_argv()
+    args = sys.argv[1:]
+    if args[:1] == ["--version"]:
+        print("Hermes Agent (test stub)")
+    elif args[:1] == ["plugins"]:
+        plugins(args[1:])
+    elif args[:1] == ["config"]:
+        config(args[1:])
+    else:
+        fail(f"stub: unsupported command {args}")
+
+
+if __name__ == "__main__":
+    main()
