@@ -18,6 +18,8 @@ on it (measured against it, see README): `plugins enable` writes
 `enabled: []` behind and stamps `_config_version: 46`, `config unset` prunes
 parents it leaves empty, `config set` coerces a JSON list value to a list.
 
+HERMES_STUB_VENV=DIR makes `--run-module pm.environments` answer with DIR as the
+selected dependency venv (the launcher interface of fdec926e); unset, it fails.
 HERMES_STUB_FAIL_INSTALL=1 makes `plugins install` fail (the copy-fallback test).
 HERMES_STUB_SCAN=caution|dangerous makes `plugins install` print the real CLI's
 scan verdict line and refuse, as the real CLI does non-interactively; --force
@@ -226,6 +228,16 @@ def main() -> None:
     args = sys.argv[1:]
     if args[:1] == ["--version"]:
         print("Hermes Agent (test stub)")
+    elif args[:2] == ["--run-module", "pm.environments"]:
+        # hermes-agent fdec926e: Hermes's activation environment as JSON; its
+        # PYTHONPATH ends with the selected venv's site-packages. The venv is
+        # $HERMES_STUB_VENV; without it this Hermes gives no answer.
+        venv = os.environ.get("HERMES_STUB_VENV")
+        if not venv:
+            fail("RuntimeError: no committed dependency environment")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(["/stub/hermes-agent", f"{venv}/lib/python3.14/site-packages"])
+        print(json.dumps(env))
     elif args[:1] == ["plugins"]:
         plugins(args[1:])
     elif args[:1] == ["config"]:
