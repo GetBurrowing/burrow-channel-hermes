@@ -603,12 +603,140 @@ def test_install_over_a_legacy_install_migrates_the_token_and_mcp_entry(checkout
 
 
 def test_find_hermes_python_is_the_same_code_in_both_scripts():
-    def body(name):
+    def body(name, fn):
         src = (ROOT / name).read_text()
-        start = src.index("find_hermes_python() {")
+        start = src.index(f"{fn}() {{")
         return src[start : src.index("\n}\n", start)]
 
-    assert body("install.sh") == body("uninstall.sh")
+    for fn in ("find_hermes_python", "hermes_venv_python"):
+        assert body("install.sh", fn) == body("uninstall.sh", fn), fn
+
+
+# ------------------------------------------- a #!/bin/sh launcher (fdec926e)
+#
+# Every launcher hermes-agent fdec926e installs is a POSIX sh wrapper
+# (`#!/bin/sh` + `exec <python> -I -c ... "$@"`), measured in a throwaway
+# HERMES_HOME. The stub above has a python shebang, which is why an installer
+# that took the shebang for the interpreter passed here and failed on the real
+# thing with "/bin/sh is older than Python 3.8". These run the scripts through
+# a real sh wrapper.
+
+
+def _sh_launcher(tmp_path: Path) -> Path:
+    d = tmp_path / "launcher-bin"
+    d.mkdir()
+    launcher = d / "hermes"
+    launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{STUB_DIR / "hermes"}" "$@"\n')
+    launcher.chmod(0o755)
+    return launcher
+
+
+def _venv(tmp_path: Path) -> Path:
+    """A venv-shaped dir whose bin/python is this interpreter (it has ruamel.yaml)."""
+    venv = tmp_path / "hermes-venv"
+    (venv / "lib" / "python3.14" / "site-packages").mkdir(parents=True)
+    (venv / "bin").mkdir()
+    py = venv / "bin" / "python"
+    py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    py.chmod(0o755)
+    return venv
+
+
+def _sh_env(env: dict, launcher: Path, **extra: str) -> dict:
+    # The launcher's directory first, and NO python3 ahead of the system one
+    # that could stand in for a missing answer: the fallback is tested apart.
+    return {**env, "PATH": os.pathsep.join([str(launcher.parent), os.environ["PATH"]]), **extra}
+
+
+def _mcp_command(home: Path) -> str:
+    return config(home)["mcp_servers"]["startup-suite"]["command"]
+
+
+def test_a_sh_launcher_resolves_to_the_venv_hermes_selects(checkout, home, env, token, tmp_path):
+    launcher = _sh_launcher(tmp_path)
+    venv = _venv(tmp_path)
+    proc = install(
+        checkout,
+        home,
+        _sh_env(env, launcher, HERMES_STUB_VENV=str(venv)),
+        token,
+        "--hermes",
+        str(launcher),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == INSTALLED
+    assert "older than Python" not in proc.stderr
+    assert _mcp_command(home) == str(venv / "bin" / "python")
+    # Asked of Hermes itself, through the wrapper.
+    assert ["--run-module", "pm.environments"] in stub_calls(env)
+
+
+def test_the_sh_launcher_check_fires_on_the_old_shebang_rule(tmp_path, home, env, token):
+    """Positive control: an installer without the shell-shebang guard takes
+    /bin/sh for python and fails exactly as the pinned one did."""
+    src = (ROOT / "install.sh").read_text()
+    guard = '    case "${interp##*/}" in\n      python*) ;;\n      *) interp="" ;;\n    esac\n'
+    assert guard in src
+    mutated = _make_checkout(tmp_path / "mutated", install_sh=src.replace(guard, ""))
+    launcher = _sh_launcher(tmp_path)
+    venv = _venv(tmp_path)
+    proc = install(
+        mutated,
+        home,
+        _sh_env(env, launcher, HERMES_STUB_VENV=str(venv)),
+        token,
+        "--hermes",
+        str(launcher),
+    )
+    assert proc.returncode != 0
+    assert "/bin/sh is older than Python 3.8" in proc.stderr
+
+
+def test_python_flag_wins_over_every_guess(checkout, home, env, token, tmp_path):
+    launcher = _sh_launcher(tmp_path)
+    venv = _venv(tmp_path)
+    explicit = _venv(tmp_path / "explicit") / "bin" / "python"
+    proc = install(
+        checkout,
+        home,
+        _sh_env(env, launcher, HERMES_STUB_VENV=str(venv)),
+        token,
+        "--hermes",
+        str(launcher),
+        "--python",
+        str(explicit),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert _mcp_command(home) == str(explicit)
+    assert ["--run-module", "pm.environments"] not in stub_calls(env)
+
+
+def test_python_flag_that_is_not_executable_is_refused(checkout, home, env, token, tmp_path):
+    proc = install(checkout, home, env, token, "--python", str(tmp_path / "no-such-python"))
+    assert proc.returncode != 0
+    assert "--python" in proc.stderr and "not an executable file" in proc.stderr
+
+
+def test_a_sh_launcher_without_an_answer_falls_back_to_python3_not_sh(
+    checkout, home, env, token, tmp_path
+):
+    launcher = _sh_launcher(tmp_path)
+    proc = install(checkout, home, _sh_env(env, launcher), token, "--hermes", str(launcher))
+    assert proc.returncode == 0, proc.stderr
+    assert Path(_mcp_command(home)).name.startswith("python")
+    assert _mcp_command(home) != "/bin/sh"
+
+
+def test_uninstall_through_a_sh_launcher(checkout, home, env, token, tmp_path):
+    launcher = _sh_launcher(tmp_path)
+    venv = _venv(tmp_path)
+    e = _sh_env(env, launcher, HERMES_STUB_VENV=str(venv))
+    assert install(checkout, home, e, token, "--hermes", str(launcher)).returncode == 0
+    un = run(
+        checkout / "uninstall.sh", "--hermes-home", str(home), "--hermes", str(launcher), env=e
+    )
+    assert un.returncode == 0, un.stderr
+    assert "startup-suite" not in (home / "config.yaml").read_text()
 
 
 # --------------------------------------------------------- the REAL hermes

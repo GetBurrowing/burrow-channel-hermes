@@ -98,8 +98,12 @@ Every run is idempotent: a second run with the same arguments changes no file
 (the plugin at the same sha is not reinstalled, the token file is compared
 with `cmp` against a fresh temp copy rather than read into the shell, and
 `config set` is skipped when the value already matches). The match is decided
-on the RAW YAML (parsed with ruamel.yaml on Hermes's own interpreter, the one
-its `hermes` script's shebang names), never through `hermes config get
+on the RAW YAML (parsed with ruamel.yaml on Hermes's own interpreter: the
+one `--python PATH` names, else the launcher's shebang when that is a Python,
+else the dependency environment Hermes itself reports through `hermes
+--run-module pm.environments`, else python3 on PATH; at hermes-agent fdec926e
+every launcher is a `#!/bin/sh` wrapper, so the shebang is never the answer
+there), never through `hermes config get
 --raw`, which expands `${VAR}` placeholders from the environment and would
 hand an expanded value to the shell through a child's stdout. Measured
 against the real CLI (fdec926e): the second install prints no `Set` line and

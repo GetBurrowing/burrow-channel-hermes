@@ -65,6 +65,9 @@ usage: install.sh --url wss://<host>/runtime/ws --runtime-id <id> [options]
                        delivery to spaces the agent participates in)
   --allowed-users CSV  write SUITE_ALLOWED_USERS=CSV (Suite display names)
   --hermes BIN         the hermes executable (default: hermes on PATH)
+  --python PATH        the interpreter that reads config.yaml and runs the MCP
+                       bridge (default: the launcher's python shebang, else
+                       the environment Hermes selects, else python3 on PATH)
   --repo URL           plugin git repository, used when not run from a checkout
   --ref SHA            commit to install (default: the checkout's HEAD, or the
                        default branch of --repo)
@@ -91,6 +94,7 @@ MCP_URL_ARG=""
 ALLOW_ALL=""
 ALLOWED_USERS=""
 HERMES_BIN="${HERMES_BIN:-hermes}"
+PYTHON_ARG=""
 REPO_URL="$DEFAULT_REPO"
 REF_ARG=""
 COPY_FALLBACK=0
@@ -101,7 +105,7 @@ refuse_token_arg() {
   die "--token is refused: a token on the command line is visible to every local user through ps and /proc/<pid>/cmdline. Pipe it on stdin (printf '%s' \"\$TOKEN\" | install.sh ...) or pass --token-file PATH (a file only you can read)."
 }
 
-need_value() { [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"; }
+need_value() { if [ "$#" -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value"; fi; }
 
 parse_args() {
   while [ "$#" -gt 0 ]; do
@@ -122,6 +126,8 @@ parse_args() {
       --allowed-users=*) ALLOWED_USERS="${1#*=}"; shift ;;
       --hermes) need_value "$@"; HERMES_BIN="$2"; shift 2 ;;
       --hermes=*) HERMES_BIN="${1#*=}"; shift ;;
+      --python) need_value "$@"; PYTHON_ARG="$2"; shift 2 ;;
+      --python=*) PYTHON_ARG="${1#*=}"; shift ;;
       --repo) need_value "$@"; REPO_URL="$2"; shift 2 ;;
       --repo=*) REPO_URL="${1#*=}"; shift ;;
       --ref) need_value "$@"; REF_ARG="$2"; shift 2 ;;
@@ -279,31 +285,70 @@ store_token() {
 
 # ------------------------------------------------------------------ python
 
-# The interpreter Hermes itself runs on (its console script's shebang). It
-# has ruamel.yaml, which Hermes needs to read config.yaml, and it runs the
-# MCP bridge (standard library only). Falls back to python3 on PATH.
 HPY=""
+
+# The python of the dependency environment Hermes itself selects, asked of
+# Hermes: `hermes --run-module pm.environments` prints Hermes's activation
+# environment as JSON, whose PYTHONPATH is `<repo>:<venv>/lib/pythonX.Y/
+# site-packages` (hermes-agent fdec926e). Prints nothing when this Hermes
+# does not answer that way. The output is an environment: only PYTHONPATH is
+# read from it, and none of it is printed.
+hermes_venv_python() {
+  local out pp entry parts=()
+  out="$("$HERMES_BIN" --run-module pm.environments </dev/null 2>/dev/null)" || return 0
+  [[ "$out" =~ \"PYTHONPATH\":\ \"([^\"]*)\" ]] || return 0
+  pp="${BASH_REMATCH[1]}"
+  IFS=: read -r -a parts <<<"$pp"
+  for entry in ${parts[@]+"${parts[@]}"}; do
+    if [[ "$entry" =~ ^(.*)/lib/python[0-9.]+/site-packages/?$ ]]; then
+      [ ! -x "${BASH_REMATCH[1]}/bin/python" ] || printf '%s' "${BASH_REMATCH[1]}/bin/python"
+      return 0
+    fi
+  done
+}
+
+# The interpreter that reads config.yaml (it needs Hermes's ruamel.yaml) and
+# runs the MCP bridge (standard library only). In order:
+#   1. --python PATH, when given (suite-cli passes the one it resolved);
+#   2. the launcher's shebang, when that is a PYTHON. A shell shebang is a
+#      wrapper, not an interpreter: every launcher hermes-agent fdec926e
+#      installs is `#!/bin/sh`, and taking /bin/sh for python is the failure
+#      this order exists to prevent;
+#   3. the dependency environment Hermes selects (hermes_venv_python);
+#   4. python3 on PATH.
 find_hermes_python() {
   local bin line="" interp="" words=()
-  bin="$(command -v "$HERMES_BIN")"
-  if [ -f "$bin" ]; then
-    IFS= read -r line <"$bin" || true
-  fi
-  if [[ "$line" == '#!'* ]]; then
-    read -r -a words <<<"${line#??}"
-    if [ "${#words[@]}" -gt 0 ]; then
-      interp="${words[0]}"
-      if [ "${interp##*/}" = env ] && [ "${#words[@]}" -gt 1 ]; then
-        interp="$(command -v "${words[1]}" || true)"
+  if [ -n "$PYTHON_ARG" ]; then
+    interp="$PYTHON_ARG"
+    [ -x "$interp" ] || die "--python $interp is not an executable file"
+  else
+    bin="$(command -v "$HERMES_BIN")"
+    if [ -f "$bin" ]; then
+      IFS= read -r line <"$bin" || true
+    fi
+    if [[ "$line" == '#!'* ]]; then
+      read -r -a words <<<"${line#??}"
+      if [ "${#words[@]}" -gt 0 ]; then
+        interp="${words[0]}"
+        if [ "${interp##*/}" = env ] && [ "${#words[@]}" -gt 1 ]; then
+          interp="$(command -v "${words[1]}" || true)"
+        fi
       fi
     fi
+    case "${interp##*/}" in
+      python*) ;;
+      *) interp="" ;;
+    esac
+    if [ -z "$interp" ] || [ ! -x "$interp" ]; then
+      interp="$(hermes_venv_python)"
+    fi
+    if [ -z "$interp" ] || [ ! -x "$interp" ]; then
+      interp="$(command -v python3 || true)"
+    fi
   fi
-  if [ -z "$interp" ] || [ ! -x "$interp" ]; then
-    interp="$(command -v python3 || true)"
-  fi
-  [ -n "$interp" ] || die "no python3 found (needed for the MCP bridge and to read config.yaml)"
+  [ -n "$interp" ] || die "no python3 found (needed for the MCP bridge and to read config.yaml); pass --python PATH"
   "$interp" -c 'import sys; sys.exit(sys.version_info < (3, 8))' ||
-    die "$interp is older than Python 3.8"
+    die "$interp is older than Python 3.8 (or is not a Python); pass --python PATH"
   HPY="$interp"
 }
 
