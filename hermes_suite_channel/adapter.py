@@ -60,6 +60,7 @@ from gateway.platforms.helpers import MessageDeduplicator
 from .config import TOKEN_ENV, TOKEN_FILE_ENV, TOKEN_FILE_RELPATH, ConfigError, SuiteConfig
 from .envelope import wrap_untrusted
 from .inbound import Attention, parse_attention
+from .inbound_media import MAX_IMAGES, MAX_TOTAL_BYTES, download_image, image_attachments
 from .redact import RedactingLogger
 from .suite_client import (
     MAX_ATTACHMENT_BYTES,
@@ -378,7 +379,45 @@ class SuiteAdapter(BasePlatformAdapter):
     async def _on_attention(self, payload: dict[str, Any]) -> None:
         event = self.build_event(payload)
         if event is not None:
+            await self._attach_images(event, payload)
             await self.handle_message(event)
+
+    async def _attach_images(self, event: MessageEvent, payload: dict[str, Any]) -> None:
+        attachments = image_attachments(payload)
+        if not attachments:
+            return
+        from hermes_constants import get_hermes_home
+
+        cache = get_hermes_home() / "image_cache"
+        remaining = MAX_TOTAL_BYTES
+        failed = max(0, len(attachments) - MAX_IMAGES)
+        for attachment in attachments[:MAX_IMAGES]:
+            try:
+                if self.suite_config is None:
+                    raise ValueError("Suite is not configured")
+                path, mime, size = await asyncio.to_thread(
+                    download_image,
+                    attachment,
+                    self.suite_config.url,
+                    self.suite_config.token,
+                    cache,
+                    remaining,
+                )
+                event.media_urls.append(path)
+                event.media_types.append(mime)
+                remaining -= size
+            except Exception:
+                # Never log HTTP bodies, secrets, or attacker-controlled text.
+                failed += 1
+                self._log.warning("could not load an inbound Suite image")
+        if event.media_urls:
+            event.message_type = MessageType.PHOTO
+        if failed:
+            event.metadata["suite_image_failures"] = failed
+            event.text += (
+                f" [Suite adapter: {failed} image attachment(s) could not be loaded; "
+                "do not assume their contents are visible.]"
+            )
 
     # ── outbound ─────────────────────────────────────────────────────────
 

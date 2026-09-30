@@ -528,3 +528,73 @@ async def test_malformed_suite_url_fails_connect_without_the_token(monkeypatch, 
     assert TOKEN not in adapter._fatal_error_message
     assert "SUITE_URL" in adapter._fatal_error_message
     assert all(TOKEN not in r.getMessage() for r in caplog.records)
+
+
+async def test_inbound_images_reach_media_fields(live, monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from gateway.platforms.event import MessageType
+
+    calls = []
+
+    def download(att, url, token, cache, remaining):
+        calls.append(att)
+        path = tmp_path / (str(len(calls)) + ".png")
+        path.write_bytes(b"image-test-fixture")
+        return str(path), "image/png", 18
+
+    monkeypatch.setattr(adapter_mod, "download_image", download)
+    payload = chat_attention(content="look here")
+    payload["message"]["attachments"] = [
+        {"content_type": "image/png", "id": "one"},
+        {"content_type": "image/png", "id": "two"},
+    ]
+    await live._on_attention(payload)
+    event = live.events[-1]
+    assert event.message_type == MessageType.PHOTO
+    assert len(event.media_urls) == 2
+    assert all(Path(p).is_file() for p in event.media_urls)
+    assert event.media_types == ["image/png", "image/png"]
+    assert "look here" in event.text and "suite-untrusted" in event.text
+    assert event.allow_gateway_control is False
+    await live._on_attention(payload)
+    assert len(calls) == 2  # duplicate does not download again
+
+
+async def test_image_only_and_partial_failure(live, monkeypatch):
+    calls = []
+
+    def download(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError("secret must not enter event")
+        return "/local/test.png", "image/png", 1
+
+    monkeypatch.setattr(adapter_mod, "download_image", download)
+    payload = chat_attention(content="")
+    payload["message"]["attachments"] = [{"content_type": "image/png"}] * 2
+    await live._on_attention(payload)
+    event = live.events[-1]
+    assert "[Image attachment]" in event.text
+    assert "System dispatch" not in event.text
+    assert event.media_urls == ["/local/test.png"]
+    assert event.metadata["suite_image_failures"] == 1
+    assert "secret" not in event.text
+
+
+async def test_image_count_cap_and_all_failed_still_delivers_text(live, monkeypatch):
+    calls = []
+
+    def download(*args):
+        calls.append(args)
+        raise OSError("denied")
+
+    monkeypatch.setattr(adapter_mod, "download_image", download)
+    payload = chat_attention(content="caption survives")
+    payload["message"]["attachments"] = [{"content_type": "image/png"}] * 10
+    await live._on_attention(payload)
+    event = live.events[-1]
+    assert len(calls) == 8
+    assert event.media_urls == []
+    assert event.metadata["suite_image_failures"] == 10
+    assert "caption survives" in event.text

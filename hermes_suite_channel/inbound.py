@@ -29,6 +29,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from .inbound_media import image_attachments
+
 # Scalars read from the signal root into the envelope header and event metadata.
 ROOT_KEYS: tuple[str, ...] = (
     "space_id",
@@ -69,7 +71,11 @@ class Attention:
     @property
     def body(self) -> str:
         """The body the agent sees: the text, or a placeholder naming what fired."""
-        return self.text if self.text.strip() else describe_bodyless_dispatch(self.ids)
+        if self.text.strip():
+            return self.text
+        if image_attachments(self.raw):
+            return "[Image attachment]"
+        return describe_bodyless_dispatch(self.ids)
 
     @property
     def actionable(self) -> bool:
@@ -77,6 +83,7 @@ class Attention:
         a presence sweep or a reconnect echo, not work."""
         return bool(
             self.text.strip()
+            or image_attachments(self.raw)
             or self.ids.get("task_id")
             or self.ids.get("message_id")
             or self.ids.get("responsibility_key")
