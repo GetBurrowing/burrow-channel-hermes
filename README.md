@@ -478,3 +478,31 @@ plugins. hermes-agent only pins `websockets` itself for Python >= 3.14.
 MIT, see [LICENSE](LICENSE). The text is copied from `openclaw-suite-channel`.
 `claude-code-suite-channel` ships no LICENSE file (its `package.json` declares
 MIT), so the openclaw copy is the only license text there is to match.
+
+
+### Incoming images
+
+Images on the triggering Suite message are fetched through the authenticated
+same-origin `/mcp` endpoint (`attachment.get_inline`), decoded locally, and
+attached to Hermes `MessageEvent.media_urls` / `media_types`. At least one
+successful image makes the event a `PHOTO`; its caption remains in the existing
+untrusted envelope and cannot invoke gateway commands. Image-only messages are
+supported. Historical messages are not automatically downloaded.
+
+This avoids the previous text-only event and the manual workaround of feeding
+megabytes of base64 through a tool result (which can spill to a text file before
+vision sees it). It does not change the generic MCP bridge's output format.
+
+PNG, JPEG, GIF, and WebP signatures are accepted. Downloads have a 15-second
+socket timeout and bounded response reads, with limits of eight images,
+10 MiB per image, and 25 MiB total per message. Files have generated names and
+mode 0600 in the profile's `image_cache`; incoming filenames are never paths.
+Only Suite attachment IDs/relative attachment paths are accepted, not arbitrary
+remote URLs, and authenticated requests do not follow redirects. The runtime
+credential stays in the HTTP Authorization header, never in the event or logs.
+
+An individual failure does not discard the caption or successfully loaded
+images: the event reports how many images were unavailable. Non-image
+attachments are unchanged. This path assumes the standard `/mcp` endpoint on
+the configured Suite origin and permission to call `attachment.get_inline`;
+custom cross-origin MCP deployments are not automatically inferred.
