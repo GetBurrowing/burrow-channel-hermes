@@ -49,6 +49,10 @@ optional_env:
     description: "This agent's Suite agent id, used to drop its own messages if Suite echoes them"
     prompt: "Suite agent id (optional)"
     password: false
+  - name: SUITE_TRUSTED_USER_IDS
+    description: "Comma-separated Suite USER ids (UUIDs, not names) whose messages are delivered as owner instructions instead of untrusted content. Empty trusts nobody. Never enables Hermes /commands."
+    prompt: "Trusted Suite user ids (comma-separated, or empty)"
+    password: false
   - name: SUITE_RECONNECT_MIN_MS
     description: "First reconnect delay in ms (default 1000)"
     prompt: "Reconnect min ms"

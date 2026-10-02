@@ -12,6 +12,7 @@ sibling has none.
 from __future__ import annotations
 
 import os
+import re
 import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -52,6 +53,39 @@ TOKEN_FILE_RELPATH = Path("mcp-tokens") / "startup-suite-platform.runtime-token"
 # ``GatewayConfig.to_dict()`` nests; a token in ``extra`` (or in the typed
 # ``PlatformConfig.token`` field) would ride along wherever that dict goes.
 _ENV_ONLY = frozenset({"token"})
+
+
+# Suite user ids whose messages are delivered as owner instructions rather than
+# inside the untrusted envelope. Env first, then ``extra["trusted_user_ids"]``
+# (a comma string or a list). Empty, the default, trusts nobody. Only canonical
+# UUIDs are kept: an entry of any other shape (a display name, a typo) is
+# dropped, so a misconfiguration trusts LESS, never more.
+TRUSTED_USER_IDS_ENV = "SUITE_TRUSTED_USER_IDS"
+_UUID = re.compile(r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+
+
+def parse_trusted_user_ids(raw: Any) -> tuple[frozenset[str], int]:
+    """``(kept ids, number of entries dropped as not-a-UUID)``. Blank entries
+    are skipped silently; ids are lower-cased (core emits lower case)."""
+    if raw is None:
+        return frozenset(), 0
+    if isinstance(raw, str):
+        items: list[Any] = raw.split(",")
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        items = list(raw)
+    else:
+        items = [raw]
+    kept: set[str] = set()
+    dropped = 0
+    for item in items:
+        text = item.strip().lower() if isinstance(item, str) else None
+        if text == "":
+            continue
+        if text is not None and _UUID.match(text):
+            kept.add(text)
+        else:
+            dropped += 1
+    return frozenset(kept), dropped
 
 
 class ConfigError(ValueError):
@@ -115,6 +149,8 @@ class SuiteConfig:
     push_timeout_ms: int = 10_000
     join_timeout_ms: int = 10_000
     dedupe_window_ms: int = 1_000
+    trusted_user_ids: frozenset[str] = frozenset()
+    trusted_user_ids_dropped: int = 0
 
     def __post_init__(self) -> None:
         for key in _REQUIRED:
@@ -157,4 +193,10 @@ class SuiteConfig:
                 values[key] = typ(raw)
             except (TypeError, ValueError):
                 raise ConfigError(f"setting {key} must be {typ.__name__}") from None
+        raw_trusted = env.get(TRUSTED_USER_IDS_ENV)
+        if raw_trusted in (None, ""):
+            raw_trusted = extra.get("trusted_user_ids")
+        trusted, dropped = parse_trusted_user_ids(raw_trusted)
+        values["trusted_user_ids"] = trusted
+        values["trusted_user_ids_dropped"] = dropped
         return cls(**values)

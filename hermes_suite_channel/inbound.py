@@ -8,7 +8,13 @@ Payload shapes (core, origin/main):
   message: %{content, author, attachments}, history, context, tools}``. The
   signal carries ``reason``, ``space_id``, ``message_id`` and, in an
   execution space, ``task_id`` / ``task_status``, plus ``agent_id`` (the
-  RECEIVING agent). ``message`` carries NO ``author_id`` today.
+  RECEIVING agent). ``message`` also carries the author's server-known
+  identity (core PR #1169): ``author_type`` (the authoring participant's
+  type: ``user`` / ``agent`` / ``system``), ``author_user_id`` (set only for
+  a user) and ``author_agent_id`` (set only for an agent). Read from the
+  participant row, not the caller-settable message snapshot. An older core
+  sends none of the three; they then read as "" and nothing is trusted. There
+  is still no ``message.author_id``.
 - system_event path: ``build_system_event_signal/2`` sends no ``message`` key.
   The rendered prompt is at ``signal.prompt``; correlation ids are lifted to
   the signal ROOT (``lift_correlation_ids/2``) and also left in
@@ -62,6 +68,8 @@ class Attention:
     reply_space_id: str  # root space_id, else metadata.space_id, else ""
     author: str
     author_id: str
+    author_type: str  # message.author_type ("user" / "agent" / "system"), else ""
+    author_user_id: str  # message.author_user_id, else ""
     text: str  # message.content, else signal.prompt, else ""
     has_message: bool
     raw: Mapping[str, Any] = field(repr=False)
@@ -123,6 +131,8 @@ def parse_attention(payload: Mapping[str, Any]) -> Attention:
         reply_space_id=reply_space,
         author=_s(message.get("author")),
         author_id=_s(message.get("author_id")),
+        author_type=_s(message.get("author_type")),
+        author_user_id=_s(message.get("author_user_id")),
         text=text,
         has_message=isinstance(message_raw, dict),
         raw=payload,
