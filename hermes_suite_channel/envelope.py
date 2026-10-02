@@ -31,6 +31,13 @@ body is neutralised so it cannot even spell one:
 
 Header values get attribute escaping (``&``, quotes, ``<``, ``>``, CR, LF) and
 then the same three neutralisers.
+
+A message whose author is a trusted principal (``SUITE_TRUSTED_USER_IDS``,
+decided by the adapter on core's ``author_type`` + ``author_user_id``, never
+on a display name) is NOT wrapped: ``frame_trusted`` gives it a one-line
+plain header naming the owner, the verified id and the space, then the body
+with the same neutralisers. Trust there means "instructions from your
+owner"; it never enables Hermes /commands.
 """
 
 from __future__ import annotations
@@ -97,6 +104,26 @@ def escape_attr(value: Any) -> str:
         .replace("\n", "&#10;")
     )
     return neutralise(text)
+
+
+def _one_line(value: Any) -> str:
+    text = "" if value is None else str(value)
+    return neutralise(" ".join(text.split()))
+
+
+def frame_trusted(*, body: str, author: str, author_user_id: str, space_id: str) -> str:
+    """A trusted owner's message: plain framing line, then the neutralised body.
+
+    The neutralisers still run: special-token shapes are never safe in a
+    prompt, and an echoed mention token would still re-invite an agent.
+    """
+    name = _one_line(author) or "(no display name)"
+    where = f" in space {_one_line(space_id)}" if space_id else ""
+    header = (
+        f"[Suite message from your owner {name} "
+        f"(verified user id {_one_line(author_user_id)}){where}]"
+    )
+    return f"{header}\n{neutralise(body)}"
 
 
 def new_nonce() -> str:

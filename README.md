@@ -230,7 +230,7 @@ and an agent turn called `mcp__startup_suite__space_list` through it.
 | `plugin.yaml`, `__init__.py`, `adapter.py` | the Hermes plugin entry points (root = plugin dir) |
 | `hermes_suite_channel/adapter.py` | `SuiteAdapter(BasePlatformAdapter)` and `register(ctx)` |
 | `hermes_suite_channel/inbound.py` | `parse_attention()`: one attention payload read once |
-| `hermes_suite_channel/envelope.py` | `wrap_untrusted()`: the untrusted-content envelope |
+| `hermes_suite_channel/envelope.py` | `wrap_untrusted()`: the untrusted-content envelope; `frame_trusted()`: a trusted owner's framing |
 | `hermes_suite_channel/suite_client.py` | asyncio Phoenix V2 client for core's `/runtime/ws` socket |
 | `hermes_suite_channel/config.py` | `SuiteConfig.from_extra(extra, env)`: `PlatformConfig.extra` keys, env overrides; `resolve_token()`, the token file |
 | `hermes_suite_channel/mcp_bridge.py` | the stdio MCP server that relays to Suite's `/mcp` with the token from the file |
@@ -260,7 +260,9 @@ seeds the url, runtime id and tunables into `extra` and deliberately not the
 token.
 
 Optional: `SUITE_ALLOWED_USERS`, `SUITE_ALLOW_ALL_USERS`, `SUITE_HOME_CHANNEL`
-(cron delivery space), `SUITE_AGENT_ID` (see "Self-authored messages").
+(cron delivery space), `SUITE_AGENT_ID` (see "Self-authored messages"),
+`SUITE_TRUSTED_USER_IDS` (see "Trusted principals"; `extra` key
+`trusted_user_ids`, a comma string or a list).
 
 Tunables (an experiment surface; change the curve without a code change):
 
@@ -287,7 +289,8 @@ An `attention` event becomes one Hermes `MessageEvent`:
 | `user_name` | `message.author` |
 | `message_id` | `signal.message_id` |
 | `raw_message` | the payload |
-| `text` | `wrap_untrusted(...)` around `message.content`, else `signal.prompt` |
+| `text` | `wrap_untrusted(...)` around `message.content`, else `signal.prompt`; `frame_trusted(...)` instead for a trusted principal |
+| `metadata["suite_trusted_author"]` | `True` only when the message was delivered as a trusted principal's |
 
 `message.content` falling back to `signal.prompt` is the `system_event_prompt`
 feature the handshake declares. A dispatch with neither gets
@@ -300,8 +303,48 @@ core dual-writes them to the root and `metadata`. Events carry
 Authorization. Hermes default-denies a platform with no allowlist. Suite core
 already limits delivery to spaces the agent participates in, so the usual
 setting is `SUITE_ALLOW_ALL_USERS=true`; `SUITE_ALLOWED_USERS` takes Suite
-display names plus `suite-system` for task dispatches. Core sends no
-`message.author_id` today, so allowlist entries are display names.
+display names plus `suite-system` for task dispatches. That allowlist decides
+who may START a turn, and it is keyed on display names, so it grants no trust:
+whether a message is an instruction is decided separately, by
+`SUITE_TRUSTED_USER_IDS` on a server-set user id (below).
+
+Author identity. Since core PR #1169 a chat attention's `message` carries
+`author_type` (`user` / `agent` / `system`, the authoring participant's type),
+`author_user_id` (a user's Suite user id; `null` for anyone else) and
+`author_agent_id` (an agent's id; `null` for anyone else). Core reads them
+from the participant row, not from the message's caller-settable author
+snapshot. There is still no `message.author_id`. A system_event and a
+TaskRouter dispatch carry no user author.
+
+### Trusted principals
+
+`SUITE_TRUSTED_USER_IDS` is a comma list of Suite **user ids** (UUIDs). It is
+opt-in per agent and empty by default, and empty means every message is
+wrapped, as before. A message is delivered as an owner instruction only when
+all of these hold:
+
+- it is a chat message (a system_event never is);
+- `message.author_type == "user"`;
+- `message.author_user_id` is in the list.
+
+The display name is never consulted: a user or agent who shares or picks the
+owner's name, an agent author, and a core too old to send the id all stay
+wrapped. An entry that is not a UUID (a display name, a typo) is dropped with
+a warning that gives a count, never the entry, so a misconfiguration trusts
+fewer people, never more.
+
+A trusted message arrives as:
+
+```
+[Suite message from your owner <name> (verified user id <uuid>) in space <space_id>]
+<body>
+```
+
+The body still gets the special-token and mention neutralisers, and the
+framing line is one line (newlines in the name are folded). **Trust means
+instructions, not control:** `allow_gateway_control` stays `False`, so a
+trusted owner's text still cannot run Hermes /commands. Use the Hermes CLI
+for those.
 
 Self-authored messages are dropped: any attention whose `message_id` this
 adapter posted, or whose `author_id` equals `signal.agent_id` or
@@ -444,8 +487,10 @@ reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
   `secret: true` and `password: true`: Hermes's install-time prompt masks
   only `secret` entries, `password` masks it in `hermes config`.
   `tests/test_plugin_load.py` drives Hermes's own prompt function.
-- Suite message text arrives wrapped in the untrusted envelope and can never
-  run Hermes slash commands (`allow_gateway_control=False`).
+- Suite message text arrives wrapped in the untrusted envelope, except a
+  message whose server-set author is a user listed in
+  `SUITE_TRUSTED_USER_IDS` (empty by default). No message, trusted or not,
+  can run Hermes slash commands (`allow_gateway_control=False`).
 - Revoking the runtime in Suite (or `Platform.Federation.revoke_runtime/1`)
   clears its token hash; the old token is then refused on reconnect.
 
