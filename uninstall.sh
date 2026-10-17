@@ -10,8 +10,10 @@
 #   - the token file $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token
 #     (and mcp-tokens/ itself, if the install created it and it is empty);
 #   - the install record $HERMES_HOME/.suite-channel/;
-#   - the .env lines defining SUITE_URL, SUITE_RUNTIME_ID, SUITE_RUNTIME_TOKEN_FILE,
-#     SUITE_RUNTIME_TOKEN, SUITE_ALLOW_ALL_USERS and SUITE_ALLOWED_USERS.
+#   - the .env lines defining BURROW_URL, BURROW_RUNTIME_ID,
+#     BURROW_RUNTIME_TOKEN_FILE, BURROW_RUNTIME_TOKEN, BURROW_ALLOW_ALL_USERS and
+#     BURROW_ALLOWED_USERS, and the same six under their deprecated SUITE_
+#     names (install.sh writes both; v0.2.0 wrote only SUITE_).
 #     Every other .env line is kept byte for byte; a .env the install created
 #     is removed when nothing else is left in it.
 #
@@ -29,7 +31,10 @@ set -euo pipefail
 
 readonly PLUGIN_NAME="startup-suite-platform"
 readonly MCP_NAME="startup-suite"
-readonly ENV_KEYS=(SUITE_URL SUITE_RUNTIME_ID SUITE_RUNTIME_TOKEN_FILE SUITE_RUNTIME_TOKEN SUITE_ALLOW_ALL_USERS SUITE_ALLOWED_USERS)
+readonly ENV_KEYS=(
+  BURROW_URL BURROW_RUNTIME_ID BURROW_RUNTIME_TOKEN_FILE BURROW_RUNTIME_TOKEN BURROW_ALLOW_ALL_USERS BURROW_ALLOWED_USERS
+  SUITE_URL SUITE_RUNTIME_ID SUITE_RUNTIME_TOKEN_FILE SUITE_RUNTIME_TOKEN SUITE_ALLOW_ALL_USERS SUITE_ALLOWED_USERS
+)
 readonly TOKEN_RELPATH="mcp-tokens/startup-suite-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
 readonly RESULT_LINE="hermes-suite-channel: uninstalled"
@@ -369,7 +374,7 @@ if [ -f "$ENV_FILE" ]; then
     printf '%s' "$out" >"$tmp"
     chmod --reference="$ENV_FILE" "$tmp" 2>/dev/null || chmod 600 "$tmp"
     mv -f "$tmp" "$ENV_FILE"
-    log "removed the Suite keys from $ENV_FILE"
+    log "removed the Burrow keys from $ENV_FILE"
   fi
   # install.sh created .env and nothing else has written to it since.
   if [ "$ENV_CREATED" = 1 ] && [ ! -s "$ENV_FILE" ]; then

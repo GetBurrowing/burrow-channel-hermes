@@ -32,7 +32,7 @@ body is neutralised so it cannot even spell one:
 Header values get attribute escaping (``&``, quotes, ``<``, ``>``, CR, LF) and
 then the same three neutralisers.
 
-A message whose author is a trusted principal (``SUITE_TRUSTED_USER_IDS``,
+A message whose author is a trusted principal (``BURROW_TRUSTED_USER_IDS``,
 decided by the adapter on core's ``author_type`` + ``author_user_id``, never
 on a display name) is NOT wrapped: ``frame_trusted`` gives it a one-line
 plain header naming the owner, the verified id and the space, then the body

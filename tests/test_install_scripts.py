@@ -93,7 +93,11 @@ def home(tmp_path) -> Path:
 @pytest.fixture
 def env(tmp_path, home) -> dict:
     return {
-        **os.environ,
+        **{
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("HERMES_SUITE_CHANNEL_REPO", "HERMES_BURROW_CHANNEL_REPO")
+        },
         # The stub runs on `python3`: this interpreter, which has ruamel.yaml.
         "PATH": os.pathsep.join(
             [str(STUB_DIR), str(Path(sys.executable).parent), os.environ["PATH"]]
@@ -179,9 +183,13 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
 
     env_text = (home / ".env").read_text()
     assert env_text.startswith(PRE_ENV)
+    # Both spellings: the plugin reads BURROW_ first, v0.2.0 reads SUITE_ only.
     assert env_text[len(PRE_ENV) :] == (
+        "BURROW_URL=wss://suite.example.test/runtime/ws\n"
         "SUITE_URL=wss://suite.example.test/runtime/ws\n"
+        "BURROW_RUNTIME_ID=rt-01a0d6c5\n"
         "SUITE_RUNTIME_ID=rt-01a0d6c5\n"
+        f"BURROW_RUNTIME_TOKEN_FILE={token_path(home)}\n"
         f"SUITE_RUNTIME_TOKEN_FILE={token_path(home)}\n"
     )
     assert token not in env_text
@@ -411,7 +419,11 @@ def test_repo_flag_beats_the_env_var(checkout, home, env, token, tmp_path, form)
 
 
 def test_repo_default_is_unchanged_without_flag_or_env(checkout, home, env, token, tmp_path):
-    env = {k: v for k, v in env.items() if k != "HERMES_SUITE_CHANNEL_REPO"}
+    env = {
+        k: v
+        for k, v in env.items()
+        if k not in ("HERMES_SUITE_CHANNEL_REPO", "HERMES_BURROW_CHANNEL_REPO")
+    }
     # Never touch the network: refuse every transport but file://.
     env["GIT_ALLOW_PROTOCOL"] = "file"
     proc = _piped_install(checkout, home, env, tmp_path, token)
@@ -452,6 +464,59 @@ def test_update_repo_flag_beats_the_env_var(checkout, home, env, token, tmp_path
     assert proc.returncode == 0, proc.stderr
     assert last_line(proc) == UPDATED
     assert str(bogus) not in proc.stderr
+
+
+def test_burrow_repo_env_var_reaches_the_clone_without_a_warning(
+    checkout, home, env, token, tmp_path
+):
+    proc = _piped_install(
+        checkout, home, {**env, "HERMES_BURROW_CHANNEL_REPO": str(checkout)}, tmp_path, token
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"cloning {checkout}\n" in proc.stderr
+    assert "deprecated" not in proc.stderr
+
+
+def test_suite_repo_env_var_still_works_and_warns_once(checkout, home, env, token, tmp_path):
+    proc = _piped_install(
+        checkout, home, {**env, "HERMES_SUITE_CHANNEL_REPO": str(checkout)}, tmp_path, token
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"cloning {checkout}\n" in proc.stderr
+    assert proc.stderr.count("HERMES_SUITE_CHANNEL_REPO is deprecated") == 1
+
+
+def test_burrow_repo_env_var_beats_the_suite_one(checkout, home, env, token, tmp_path):
+    bogus = tmp_path / "no-such-repo"
+    both = {
+        **env,
+        "HERMES_BURROW_CHANNEL_REPO": str(checkout),
+        "HERMES_SUITE_CHANNEL_REPO": str(bogus),
+    }
+    proc = _piped_install(checkout, home, both, tmp_path, token)
+    assert proc.returncode == 0, proc.stderr
+    assert f"cloning {checkout}\n" in proc.stderr
+    assert str(bogus) not in proc.stderr
+    assert "deprecated" not in proc.stderr
+
+    (checkout / "NEWFILE").write_text("x\n")
+    _git(checkout, "add", "NEWFILE")
+    _git(checkout, "commit", "-q", "-m", "next")
+    up = _piped(checkout / "update.sh", ["--hermes-home", str(home)], both)
+    assert up.returncode == 0, up.stderr
+    assert last_line(up) == UPDATED
+    assert str(bogus) not in up.stderr
+
+
+def test_update_warns_once_for_the_suite_repo_env_var(checkout, home, env, token, tmp_path):
+    assert install(checkout, home, env, token).returncode == 0
+    proc = _piped(
+        checkout / "update.sh",
+        ["--hermes-home", str(home)],
+        {**env, "HERMES_SUITE_CHANNEL_REPO": str(checkout)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stderr.count("HERMES_SUITE_CHANNEL_REPO is deprecated") == 1
 
 
 def test_empty_token_is_refused(checkout, home, env):
@@ -873,3 +938,157 @@ def test_an_env_file_the_install_created_is_removed_when_empty(checkout, home, e
     assert (home / ".env").exists()
     _uninstall(checkout, home, env)
     assert not (home / ".env").exists()
+
+
+# ------------------------------------------- BURROW_ names over a v0.2.0 host
+
+
+# Exactly what v0.2.0's install.sh wrote after PRE_ENV (its own
+# test_install_writes_env_plugin_and_mcp pinned these three lines).
+def v020_env(home: Path, url: str = "wss://suite.example.test/runtime/ws") -> str:
+    return (
+        PRE_ENV + f"SUITE_URL={url}\n"
+        "SUITE_RUNTIME_ID=rt-01a0d6c5\n"
+        f"SUITE_RUNTIME_TOKEN_FILE={token_path(home)}\n"
+    )
+
+
+def parse_env(text: str) -> dict[str, str]:
+    out = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.removeprefix("export ").partition("=")
+        out[key.strip()] = value.strip().strip('"')
+    return out
+
+
+def test_install_over_a_v020_env_rewrites_in_place_and_adds_burrow(checkout, home, env, token):
+    old = v020_env(home)
+    (home / ".env").write_text(old)
+    proc = install(checkout, home, env, token)
+    assert proc.returncode == 0, proc.stderr
+    text = (home / ".env").read_text()
+    # Every v0.2.0 line is still there, unchanged and in place; the BURROW_
+    # twins are appended after them.
+    assert text.startswith(old)
+    assert text[len(old) :] == (
+        "BURROW_URL=wss://suite.example.test/runtime/ws\n"
+        "BURROW_RUNTIME_ID=rt-01a0d6c5\n"
+        f"BURROW_RUNTIME_TOKEN_FILE={token_path(home)}\n"
+    )
+    from hermes_suite_channel.config import SuiteConfig
+
+    cfg = SuiteConfig.from_extra({}, env=parse_env(text))
+    assert (cfg.url, cfg.runtime_id, cfg.token) == (
+        "wss://suite.example.test/runtime/ws",
+        "rt-01a0d6c5",
+        token,
+    )
+    again = install(checkout, home, env, token)
+    assert again.returncode == 0 and (home / ".env").read_text() == text
+
+
+def test_install_writes_both_names_for_the_user_flags(checkout, home, env, token):
+    proc = install(checkout, home, env, token, "--allow-all-users", "--allowed-users", "Ryan,Jo")
+    assert proc.returncode == 0, proc.stderr
+    keys = parse_env((home / ".env").read_text())
+    for suffix, value in (("ALLOW_ALL_USERS", "true"), ("ALLOWED_USERS", "Ryan,Jo")):
+        assert keys[f"BURROW_{suffix}"] == keys[f"SUITE_{suffix}"] == value
+
+
+def test_install_removes_a_legacy_token_under_either_name(checkout, home, env, token):
+    (home / ".env").write_text(
+        PRE_ENV + f"SUITE_RUNTIME_TOKEN={token}\nBURROW_RUNTIME_TOKEN={token}\n"
+    )
+    assert install(checkout, home, env, token).returncode == 0
+    text = (home / ".env").read_text()
+    assert token not in text
+    assert "SUITE_RUNTIME_TOKEN=" not in text and "BURROW_RUNTIME_TOKEN=" not in text
+
+
+def test_uninstall_removes_both_spellings_and_keeps_every_other_byte(checkout, home, env, token):
+    unrelated = (
+        PRE_ENV + "BURROW_UNRELATED=keep\nSUITE_URL_NOTES=keep\n"
+        "  export   OTHER = spaced\nBURROW_URLX=keep\n"
+    )
+    (home / ".env").write_text(unrelated)
+    assert install(checkout, home, env, token, "--allowed-users", "Ryan").returncode == 0
+    with (home / ".env").open("a") as f:
+        # Hand-added spellings of every key uninstall owns, both forms.
+        f.write("BURROW_RUNTIME_TOKEN=x\nexport SUITE_ALLOW_ALL_USERS=true\n")
+    _uninstall(checkout, home, env)
+    assert (home / ".env").read_text() == unrelated
+
+
+def test_uninstall_over_a_v020_env_gives_back_pre_env(checkout, home, env, token):
+    assert install(checkout, home, env, token).returncode == 0
+    (home / ".env").write_text(v020_env(home))  # as v0.2.0 left it
+    _uninstall(checkout, home, env)
+    assert (home / ".env").read_text() == PRE_ENV
+
+
+async def test_v020_host_upgraded_by_update_sh_connects(checkout, home, env, token, monkeypatch):
+    """THE upgrade contract: a host whose .env v0.2.0's install.sh wrote
+    (SUITE_ names only) and whose config.yaml is unchanged, upgraded with this
+    update.sh, keeps both files byte for byte and connects as the same
+    runtime, through the real Hermes gateway adapter."""
+    import sys as _sys
+
+    from conftest import FAST
+    from fake_phoenix import FakePhoenix
+    from gateway.config import PlatformConfig
+    from gateway.platform_registry import platform_registry
+    from hermes_cli.plugins import PluginContext, PluginManager
+    from hermes_cli.plugins_manifest import parse_manifest_file
+
+    async with FakePhoenix() as server:
+        assert install(checkout, home, env, token).returncode == 0
+        (home / ".env").write_text(v020_env(home, server.url))
+        env_before = (home / ".env").read_bytes()
+        cfg_before = (home / "config.yaml").read_bytes()
+
+        (checkout / "NEWFILE").write_text("x\n")
+        _git(checkout, "add", "NEWFILE")
+        _git(checkout, "commit", "-q", "-m", "next")
+        up = run(checkout / "update.sh", "--hermes-home", str(home), env=env)
+        assert up.returncode == 0, up.stderr
+        assert last_line(up) == UPDATED
+        assert (home / ".env").read_bytes() == env_before
+        assert (home / "config.yaml").read_bytes() == cfg_before
+
+        for key in list(os.environ):
+            if key.startswith(("SUITE_", "BURROW_")):
+                monkeypatch.delenv(key)
+        # What Hermes does at start: .env into os.environ (env_loader.py).
+        for key, value in parse_env(env_before.decode()).items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setenv("HERMES_GATEWAY_LOCK_DIR", str(home / "locks"))
+        # Load the INSTALLED copy the way Hermes does, fresh module state.
+        # Hermes namespaces a directory module by the first scope that loads
+        # it (plugins_loader.py _BARE_MODULE_SCOPE); claim it in a throwaway map
+        # so test_plugin_load still gets the bare name.
+        from hermes_cli import plugins_loader
+
+        monkeypatch.setattr(plugins_loader, "_BARE_MODULE_SCOPE", {})
+        for name in [m for m in _sys.modules if m.startswith("hermes_plugins.startup_suite")]:
+            monkeypatch.delitem(_sys.modules, name)
+        plugin = home / "plugins" / "startup-suite-platform"
+        manifest = parse_manifest_file(plugin / "plugin.yaml", plugin, "user", "")
+        manager = PluginManager()
+        module = manager._load_directory_module(manifest)
+        assert Path(module.__file__).resolve().parent == plugin.resolve()
+        module.register(PluginContext(manifest, manager))
+        entry = platform_registry.get("startup_suite")
+        assert entry.check_fn() is True
+        assert entry.allowed_users_env == "BURROW_ALLOWED_USERS"  # neither set: deny-all
+        seed = entry.env_enablement_fn()
+        adapter = entry.adapter_factory(PlatformConfig(enabled=True, extra={**seed, **FAST}))
+        assert await adapter.connect() is True
+        try:
+            assert server.topic == "runtime:rt-01a0d6c5"
+            assert any(f"token={token}" in p for p in server.request_paths)
+        finally:
+            await adapter.disconnect()

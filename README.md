@@ -1,9 +1,9 @@
 # hermes-suite-channel
 
 Hermes Agent (Nous Research, https://github.com/NousResearch/hermes-agent)
-platform plugin for Startup Suite federation. A sibling of
+platform plugin for Burrow federation. A sibling of
 `claude-code-suite-channel` and `openclaw-suite-channel`: the same runtime
-socket, runtime id and token, with Suite attention events delivered into a
+socket, runtime id and token, with Burrow attention events delivered into a
 Hermes session and replies pushed back.
 
 Status: transport, Hermes platform adapter, installer (task 01a0d6c5 stages
@@ -18,19 +18,19 @@ The repository root IS the Hermes plugin directory: `plugin.yaml`
 
 Prerequisite: Hermes Agent is installed and `hermes` is on PATH (or pass
 `--hermes BIN`), and Hermes's runtime environment has the `mcp` Python
-package (the `mcp` extra). Without it Hermes refuses the Suite MCP server
+package (the `mcp` extra). Without it Hermes refuses the Burrow MCP server
 with "requires the 'mcp' Python SDK, but it is not installed" (measured; the
-socket channel still works, the Suite tools do not). Note that once a plugin
+socket channel still works, the Burrow tools do not). Note that once a plugin
 with Python dependencies is enabled, Hermes runs on a per-home managed
 environment (`$HERMES_HOME/installs/<id>/environments/<id>/venv`, measured at
 fdec926e: it replaces the install's own site-packages on `sys.path`), so `mcp`
-must be installed THERE; `mcp==2.0.0` is what was measured. In Suite, register
+must be installed THERE; `mcp==2.0.0` is what was measured. In Burrow, register
 a federated runtime for the agent and generate its token (the token is shown
 once).
 
 ```sh
 # From a checkout (the token on stdin; it is never accepted on argv):
-printf '%s' "$SUITE_TOKEN" | ./install.sh \
+printf '%s' "$BURROW_TOKEN" | ./install.sh \
   --url wss://suite.example.com/runtime/ws --runtime-id my-runtime --allow-all-users
 
 # One command, no checkout (stdin is the script here, so the token comes from
@@ -53,10 +53,10 @@ What install.sh changes, and nothing else:
 | Where | What |
 | --- | --- |
 | `$HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token` (mode 0600, directory 0700) | the token, and nothing else. Never in `.env`: see Security notes |
-| `$HERMES_HOME/.env` (mode 0600) | `SUITE_URL`, `SUITE_RUNTIME_ID`, `SUITE_RUNTIME_TOKEN_FILE` (the path above); `SUITE_ALLOW_ALL_USERS=true` with `--allow-all-users`, `SUITE_ALLOWED_USERS` with `--allowed-users CSV`. A `SUITE_RUNTIME_TOKEN` line an older install wrote is removed |
+| `$HERMES_HOME/.env` (mode 0600) | `BURROW_URL`, `BURROW_RUNTIME_ID`, `BURROW_RUNTIME_TOKEN_FILE` (the path above); `BURROW_ALLOW_ALL_USERS=true` with `--allow-all-users`, `BURROW_ALLOWED_USERS` with `--allowed-users CSV`. Each is ALSO written under its deprecated `SUITE_` name, so a downgrade to v0.2.0 (which reads only `SUITE_`) still connects. A `BURROW_RUNTIME_TOKEN` or `SUITE_RUNTIME_TOKEN` line an older install wrote is removed |
 | `$HERMES_HOME/plugins/startup-suite-platform` | the plugin, via `hermes plugins install <source> --ref <sha> --no-enable`, then `hermes plugins enable startup-suite-platform` |
 | `hermes_suite_channel/_build.py` in that copy | `BUILD = "<installed sha>"` (the build stamp core shows as the runtime's build) |
-| `config.yaml` `mcp_servers.startup-suite` | via `hermes config set`: a stdio server, `command` + `args` (see Suite tools). The `url` / `headers` form an older install wrote is unset |
+| `config.yaml` `mcp_servers.startup-suite` | via `hermes config set`: a stdio server, `command` + `args` (see Burrow tools). The `url` / `headers` form an older install wrote is unset |
 | `$HERMES_HOME/.suite-channel/` (0700) | the install record, written once by the FIRST install: a 0600 copy of `config.yaml` as it was, and which of `config.yaml`, `.env`, `mcp-tokens/` did not exist yet. uninstall.sh uses it and then deletes it |
 
 `$HERMES_HOME` defaults to `$HERMES_HOME`, else `~/.hermes`. `.env` is Hermes's
@@ -64,7 +64,8 @@ secret store (`hermes_cli/config.py` `get_env_path`); install.sh writes the
 lines itself, in the unquoted `KEY=value` form Hermes's own `save_env_value`
 writes, and refuses a value with whitespace, `#`, a quote or a backslash so
 that stays true. The env keys are written before the plugin is installed:
-`hermes plugins install` prompts for any unset `requires_env` variable.
+v0.2.0's manifest has `requires_env`, and `hermes plugins install` prompts
+for any unset one.
 
 Two install details that were measured, not assumed (hermes-agent fdec926e):
 
@@ -76,7 +77,7 @@ Two install details that were measured, not assumed (hermes-agent fdec926e):
 - **Private repository.** `hermes plugins install` accepts `file://` sources
   (with a warning) and `--ref <40-char sha>`. Run from a checkout, install.sh
   installs `file://<checkout>` at its HEAD. Without a checkout it clones
-  `--repo URL`, else `$HERMES_SUITE_CHANNEL_REPO`, else this repository's
+  `--repo URL`, else `$HERMES_BURROW_CHANNEL_REPO`, else this repository's
   GitHub URL, with your own git credentials (update.sh resolves the same way
   and passes the result on), asks Hermes to install the https URL (Hermes
   tries `GITHUB_TOKEN`/`GH_TOKEN` from `.env`, then `gh auth`, then the git
@@ -111,11 +112,11 @@ against the real CLI (fdec926e): the second install prints no `Set` line and
 leaves `config.yaml`, `.env` and the token file byte-identical. The last line printed on success is exactly
 `hermes-suite-channel: installed`; uninstall.sh and update.sh end with
 `hermes-suite-channel: uninstalled` and `hermes-suite-channel: updated`. The
-Suite desktop app keys on those lines.
+Burrow desktop app keys on those lines.
 
-Set `SUITE_HOME_CHANNEL` (a Suite space id) if you want cron output
+Set `BURROW_HOME_CHANNEL` (a Burrow space id) if you want cron output
 delivered somewhere specific. Without it Hermes posts its own "No home channel
-is set" notice into the first Suite space it answers in (seen in the live
+is set" notice into the first Burrow space it answers in (seen in the live
 proof); that text comes from Hermes, not from this plugin.
 
 ### Uninstall
@@ -128,9 +129,9 @@ Removes, in order: `mcp_servers.startup-suite` (`hermes config unset`), the
 plugin (`hermes plugins remove`; a copy-fallback install is disabled and
 deleted), the config.yaml bookkeeping below, the token file (and
 `mcp-tokens/` if the install created it and it is empty), the install
-record, and the `.env` lines defining `SUITE_URL`, `SUITE_RUNTIME_ID`,
-`SUITE_RUNTIME_TOKEN_FILE`, `SUITE_RUNTIME_TOKEN`, `SUITE_ALLOW_ALL_USERS` and
-`SUITE_ALLOWED_USERS`. Other `.env` lines are kept byte for byte, and a `.env`
+record, and the `.env` lines defining `BURROW_URL`, `BURROW_RUNTIME_ID`,
+`BURROW_RUNTIME_TOKEN_FILE`, `BURROW_RUNTIME_TOKEN`, `BURROW_ALLOW_ALL_USERS` and
+`BURROW_ALLOWED_USERS`, and the same six under their `SUITE_` names. Other `.env` lines are kept byte for byte, and a `.env`
 the install created is deleted when nothing else is left in it.
 
 **config.yaml.** Hermes's own writer adds keys nobody asked it to: `hermes
@@ -179,9 +180,9 @@ token is not read. It runs `install.sh --plugin-only`, which reinstalls with
 Because it leaves the configuration alone, it does NOT move an older install's
 token out of `.env`; re-run install.sh for that.
 
-## Suite tools (MCP)
+## Burrow tools (MCP)
 
-Suite's tools (messaging, tasks, plans, canvases, memory, ...) are served by
+Burrow's tools (messaging, tasks, plans, canvases, memory, ...) are served by
 core's `/mcp` endpoint under the same runtime token (ADR 0034). This plugin
 registers no tools of its own. install.sh registers the endpoint as a Hermes
 **stdio** MCP server that relays to it:
@@ -199,7 +200,7 @@ mcp_servers:
 ```
 
 Why not the plain HTTP form (`url` + `headers: {Authorization: Bearer
-${SUITE_RUNTIME_TOKEN}}`), which the first version used: Hermes resolves an
+${BURROW_RUNTIME_TOKEN}}`), which the first version used: Hermes resolves an
 HTTP server's headers ONLY by `${VAR}` interpolation from the environment
 (tools/mcp_tool_config.py `_interpolate_env_vars`; the only other resolvers
 are fixed `${userHome}`-style context names), and its own `hermes mcp add
@@ -219,7 +220,7 @@ one message per line, 202/204 writes nothing, and `Mcp-Session-Id` /
 on every request (a rotated token needs no restart), refuses a token file
 group or other can read, and phrases every failure without it. Hermes spawns
 a stdio server with a filtered environment (`_build_safe_env`), and the
-bridge needs nothing from it. Suite's endpoint sends no server-initiated
+bridge needs nothing from it. Burrow's endpoint sends no server-initiated
 messages (the GET stream answers 405), so none are relayed. Measured on the
 live rig: `hermes mcp test startup-suite` connects and discovers 24 tools,
 and an agent turn called `mcp__startup_suite__space_list` through it.
@@ -234,22 +235,58 @@ and an agent turn called `mcp__startup_suite__space_list` through it.
 | `hermes_suite_channel/envelope.py` | `wrap_untrusted()`: the untrusted-content envelope; `frame_trusted()`: a trusted owner's framing |
 | `hermes_suite_channel/suite_client.py` | asyncio Phoenix V2 client for core's `/runtime/ws` socket |
 | `hermes_suite_channel/config.py` | `SuiteConfig.from_extra(extra, env)`: `PlatformConfig.extra` keys, env overrides; `resolve_token()`, the token file |
-| `hermes_suite_channel/mcp_bridge.py` | the stdio MCP server that relays to Suite's `/mcp` with the token from the file |
+| `hermes_suite_channel/mcp_bridge.py` | the stdio MCP server that relays to Burrow's `/mcp` with the token from the file |
 | `hermes_suite_channel/redact.py` | `redact()` and `RedactingLogger`: the only path a log record takes |
 | `hermes_suite_channel/_build.py` | `BUILD`, stamped by the installer, never read from git at runtime |
 | `tests/fake_phoenix.py` | hermetic fake runtime socket on `websockets.serve` |
 | `install.sh`, `uninstall.sh`, `update.sh` | the installer (see Install) |
 | `tests/stub_hermes/hermes`, `tests/test_install_scripts.py` | the installer tests, against a stub `hermes` that records its argv (plus one against the real CLI when `HERMES_REAL_BIN` is set) |
-| `tests/test_mcp_bridge.py` | the bridge as a subprocess against an HTTP endpoint shaped like Suite's |
+| `tests/test_mcp_bridge.py` | the bridge as a subprocess against an HTTP endpoint shaped like Burrow's |
 
 ## Settings
 
-Required: `url` (`SUITE_URL`), `runtime_id` (`SUITE_RUNTIME_ID`), and the
+### Env names: `BURROW_*` first, `SUITE_*` deprecated
+
+Every setting below is read as `BURROW_<X>` first and, when that is unset or
+blank, as the deprecated `SUITE_<X>`; the first use of an old name logs one
+warning per name per process (`Burrow: SUITE_URL is deprecated; set
+BURROW_URL`). A host installed by v0.2.0, whose `.env` holds only `SUITE_`
+names, keeps working after `update.sh` with no edit. The full list is
+`ENV_FALLBACKS` in `hermes_suite_channel/config.py` (pinned by a test); the
+installer's repository override follows the same rule
+(`HERMES_BURROW_CHANNEL_REPO`, then `HERMES_SUITE_CHANNEL_REPO`).
+
+Hermes reads three of them itself, by ONE name the plugin registers at load:
+the allowlist (`*_ALLOWED_USERS`), allow-all (`*_ALLOW_ALL_USERS`) and the cron
+home channel (`*_HOME_CHANNEL`, and Hermes's own `<that name>_NAME`). Measured
+at hermes-agent fdec926e (`gateway/authz_mixin.py` `_principal_authorized`):
+registering `BURROW_ALLOWED_USERS` on a host that sets only
+`SUITE_ALLOWED_USERS=Ryan` denies Ryan as well as everyone else, and
+`SUITE_ALLOW_ALL_USERS=true` stops admitting anyone. So `register()` passes the
+spelling the host sets (`BURROW_` when set, else `SUITE_`, else `BURROW_`).
+Two consequences:
+
+- Rename one of those three in `.env` and restart the gateway; the per-turn
+  `.env` reload picks up a new VALUE, not a new name.
+- Under multiplexing, the launch profile's spelling is the one registered for
+  every profile. A secondary profile that spells it differently has its
+  allowlist ignored, which denies (Hermes's default), never admits; use one
+  spelling across profiles.
+
+`required_env` (what `hermes setup` lists and what `hermes profile create
+--clone` strips) declares every spelling the host sets, so a clone of a host
+install.sh wrote loses both `BURROW_URL` and `SUITE_URL`. `plugin.yaml`
+declares no `requires_env`: Hermes prompts at `hermes plugins install` (which
+update.sh runs) for each one unset in `.env`, one spelling per entry, so
+either choice would prompt one kind of host. Both spellings are listed under
+`optional_env` for `hermes config`.
+
+Required: `url` (`BURROW_URL`), `runtime_id` (`BURROW_RUNTIME_ID`), and the
 token. Env overrides `extra`.
 
-The token comes from, in order: the file `SUITE_RUNTIME_TOKEN_FILE` names;
+The token comes from, in order: the file `BURROW_RUNTIME_TOKEN_FILE` names;
 `$HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token` (per profile,
-through `get_hermes_home()`); the legacy `SUITE_RUNTIME_TOKEN` secret; and
+through `get_hermes_home()`); the legacy `BURROW_RUNTIME_TOKEN` secret; and
 last the value `register()` took out of `os.environ` at plugin load. Every
 name is read through Hermes's `_shared.get_scoped_secret` (profile-scoped),
 and the last rung is never used inside a multiplexed secondary profile's
@@ -260,24 +297,24 @@ Hermes serialises both in `PlatformConfig.to_dict()`. `_env_enablement`
 seeds the url, runtime id and tunables into `extra` and deliberately not the
 token.
 
-Optional: `SUITE_ALLOWED_USERS`, `SUITE_ALLOW_ALL_USERS`, `SUITE_HOME_CHANNEL`
-(cron delivery space), `SUITE_AGENT_ID` (see "Self-authored messages"),
-`SUITE_TRUSTED_USER_IDS` (see "Trusted principals"; `extra` key
+Optional: `BURROW_ALLOWED_USERS`, `BURROW_ALLOW_ALL_USERS`, `BURROW_HOME_CHANNEL`
+(cron delivery space), `BURROW_AGENT_ID` (see "Self-authored messages"),
+`BURROW_TRUSTED_USER_IDS` (see "Trusted principals"; `extra` key
 `trusted_user_ids`, a comma string or a list).
 
 Tunables (an experiment surface; change the curve without a code change):
 
 | `extra` key | env | default | source of the default |
 | --- | --- | --- | --- |
-| `reconnect_min_ms` | `SUITE_RECONNECT_MIN_MS` | 1000 | sibling `DEFAULT_RECONNECT_MS` |
-| `reconnect_max_ms` | `SUITE_RECONNECT_MAX_MS` | 30000 | sibling `DEFAULT_MAX_RECONNECT_MS` |
-| `reconnect_jitter` | `SUITE_RECONNECT_JITTER` | 0.2 | new; the sibling has no jitter |
-| `stale_traffic_ms` | `SUITE_STALE_TRAFFIC_MS` | 120000 | sibling `STALE_TRAFFIC_MS` |
-| `watchdog_interval_ms` | `SUITE_WATCHDOG_INTERVAL_MS` | 30000 | sibling `WATCHDOG_INTERVAL_MS` |
-| `heartbeat_ms` | `SUITE_HEARTBEAT_MS` | 30000 | phoenix JS default heartbeat |
-| `push_timeout_ms` | `SUITE_PUSH_TIMEOUT_MS` | 10000 | sibling `PUSH_TIMEOUT_MS` |
-| `join_timeout_ms` | `SUITE_JOIN_TIMEOUT_MS` | 10000 | phoenix JS default join timeout |
-| `dedupe_window_ms` | `SUITE_DEDUPE_WINDOW_MS` | 1000 | sibling's ~1s bucket |
+| `reconnect_min_ms` | `BURROW_RECONNECT_MIN_MS` | 1000 | sibling `DEFAULT_RECONNECT_MS` |
+| `reconnect_max_ms` | `BURROW_RECONNECT_MAX_MS` | 30000 | sibling `DEFAULT_MAX_RECONNECT_MS` |
+| `reconnect_jitter` | `BURROW_RECONNECT_JITTER` | 0.2 | new; the sibling has no jitter |
+| `stale_traffic_ms` | `BURROW_STALE_TRAFFIC_MS` | 120000 | sibling `STALE_TRAFFIC_MS` |
+| `watchdog_interval_ms` | `BURROW_WATCHDOG_INTERVAL_MS` | 30000 | sibling `WATCHDOG_INTERVAL_MS` |
+| `heartbeat_ms` | `BURROW_HEARTBEAT_MS` | 30000 | phoenix JS default heartbeat |
+| `push_timeout_ms` | `BURROW_PUSH_TIMEOUT_MS` | 10000 | sibling `PUSH_TIMEOUT_MS` |
+| `join_timeout_ms` | `BURROW_JOIN_TIMEOUT_MS` | 10000 | phoenix JS default join timeout |
+| `dedupe_window_ms` | `BURROW_DEDUPE_WINDOW_MS` | 1000 | sibling's ~1s bucket |
 
 ## Inbound
 
@@ -299,19 +336,19 @@ feature the handshake declares. A dispatch with neither gets
 no body and nothing to correlate is dropped, as the Claude Code sibling does.
 Correlation ids (`task_id`, `reason`, ...) are read from the signal root only;
 core dual-writes them to the root and `metadata`. Events carry
-`allow_gateway_control=False`: Suite text never resolves Hermes /commands.
+`allow_gateway_control=False`: Burrow text never resolves Hermes /commands.
 
-Authorization. Hermes default-denies a platform with no allowlist. Suite core
+Authorization. Hermes default-denies a platform with no allowlist. Burrow core
 already limits delivery to spaces the agent participates in, so the usual
-setting is `SUITE_ALLOW_ALL_USERS=true`; `SUITE_ALLOWED_USERS` takes Suite
+setting is `BURROW_ALLOW_ALL_USERS=true`; `BURROW_ALLOWED_USERS` takes Burrow
 display names plus `suite-system` for task dispatches. That allowlist decides
 who may START a turn, and it is keyed on display names, so it grants no trust:
 whether a message is an instruction is decided separately, by
-`SUITE_TRUSTED_USER_IDS` on a server-set user id (below).
+`BURROW_TRUSTED_USER_IDS` on a server-set user id (below).
 
 Author identity. Since core PR #1169 a chat attention's `message` carries
 `author_type` (`user` / `agent` / `system`, the authoring participant's type),
-`author_user_id` (a user's Suite user id; `null` for anyone else) and
+`author_user_id` (a user's Burrow user id; `null` for anyone else) and
 `author_agent_id` (an agent's id; `null` for anyone else). Core reads them
 from the participant row, not from the message's caller-settable author
 snapshot. There is still no `message.author_id`. A system_event and a
@@ -319,7 +356,7 @@ TaskRouter dispatch carry no user author.
 
 ### Trusted principals
 
-`SUITE_TRUSTED_USER_IDS` is a comma list of Suite **user ids** (UUIDs). It is
+`BURROW_TRUSTED_USER_IDS` is a comma list of Burrow **user ids** (UUIDs). It is
 opt-in per agent and empty by default, and empty means every message is
 wrapped, as before. A message is delivered as an owner instruction only when
 all of these hold:
@@ -349,7 +386,7 @@ for those.
 
 Self-authored messages are dropped: any attention whose `message_id` this
 adapter posted, or whose `author_id` equals `signal.agent_id` or
-`SUITE_AGENT_ID`. A `MessageDeduplicator` keyed on `message_id` (5 min TTL)
+`BURROW_AGENT_ID`. A `MessageDeduplicator` keyed on `message_id` (5 min TTL)
 sits on top of the client's 1 s identity window, for dead-letter replays.
 
 ### The untrusted envelope
@@ -382,15 +419,15 @@ server, registered in stage 4). Not built yet.
 
 ## Outbound
 
-| Hermes adapter call | Suite frame |
+| Hermes adapter call | Burrow frame |
 | --- | --- |
-| `send` (no `expect_edits`) | `reply`, acked; `SendResult.message_id` = Suite's id |
+| `send` (no `expect_edits`) | `reply`, acked; `SendResult.message_id` = Burrow's id |
 | `send_typing` / `stop_typing` | `typing` true / false |
 | `send_document`, `send_image_file`, `send_video`, `send_voice`, `send_image` (`file://`, `data:`) | `reply_with_media`, base64 |
 | `send_image` with an http(s) URL | a text `reply` with the link (not fetched: no fetch-anything proxy) |
 
 Refusals come back as `SendResult` errors, never exceptions: `retryable` is
-Suite's `recoverable`, true for not-connected, and false for a timeout or a
+Burrow's `recoverable`, true for not-connected, and false for a timeout or a
 dropped socket (the push may have landed; a blind retry could duplicate it).
 Attachments over core's per-file cap are refused before reading the file.
 Core compares the base64 length with `div(10 MiB * 4, 3)`, so the largest file
@@ -413,7 +450,7 @@ Step 3 persists. Core's `reply_chunk` is an ephemeral broadcast with no row,
 and the chat view deletes the streaming bubble on done:true, so done:true
 alone would lose the answer; the Claude Code sibling also posts a `reply` on
 its last chunk. `REQUIRES_EDIT_FINALIZE` makes the finalize edit arrive even
-when the text is unchanged; `prefers_fresh_final_streaming` is False (Suite
+when the text is unchanged; `prefers_fresh_final_streaming` is False (Burrow
 cannot delete a preview); a finalized handle accepts the same text again as a
 no-op and refuses different text. If the finalize `reply` fails, done:true is
 not sent and the bubble stays with the last text. A stream Hermes abandons
@@ -430,7 +467,7 @@ In the gateway the token lives only in `SuiteConfig.token` (excluded from
 DEBUG request line (which contains the query string), goes through
 `RedactingLogger`. `tests/test_redaction.py` asserts a sentinel token reaches
 no captured record across the connect, join-failure, reconnect and
-push-timeout paths. A malformed `SUITE_URL` is terminal: `websockets`'
+push-timeout paths. A malformed `BURROW_URL` is terminal: `websockets`'
 `InvalidURI` puts the whole URI, token included, in its message, so the client
 re-raises it as `InvalidSuiteURL` with no URL and no chained original, stops
 reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
@@ -459,7 +496,7 @@ reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
   Several spawn paths pass that environment on unfiltered; the one the review
   found is the toolchain probe (tools/env_probe.py `_run`: a bare
   `subprocess.run`, so `pip --version` and `python3 -c ...` get everything).
-  `SUITE_RUNTIME_TOKEN` is not in Hermes's `_ALWAYS_STRIP_KEYS`, and env_probe
+  `BURROW_RUNTIME_TOKEN` is not in Hermes's `_ALWAYS_STRIP_KEYS`, and env_probe
   does not apply that set anyway; the terminal tool does scrub. Removing the
   variable from `os.environ` at plugin load (which `register()` still does,
   as a second layer for a launcher-exported token) does not survive the next
@@ -483,16 +520,17 @@ reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
   `TerminalEnvironmentProvider.strip_env_keys`
   (agent/terminal_env_registry.py) feeds the Tier-1 scrub of the paths that
   scrub, and env_probe is not one of them.
-- `plugin.yaml` requires `SUITE_RUNTIME_TOKEN_FILE` (a path, prompted for in
-  the clear) and lists the legacy `SUITE_RUNTIME_TOKEN` as optional with
-  `secret: true` and `password: true`: Hermes's install-time prompt masks
-  only `secret` entries, `password` masks it in `hermes config`.
+- `plugin.yaml` requires nothing (see "Env names"), so `hermes plugins
+  install` prompts for nothing; it lists the legacy `BURROW_RUNTIME_TOKEN`
+  and `SUITE_RUNTIME_TOKEN` as optional with `secret: true` and
+  `password: true`: Hermes's install-time prompt masks only `secret`
+  entries, `password` masks it in `hermes config`.
   `tests/test_plugin_load.py` drives Hermes's own prompt function.
-- Suite message text arrives wrapped in the untrusted envelope, except a
+- Burrow message text arrives wrapped in the untrusted envelope, except a
   message whose server-set author is a user listed in
-  `SUITE_TRUSTED_USER_IDS` (empty by default). No message, trusted or not,
+  `BURROW_TRUSTED_USER_IDS` (empty by default). No message, trusted or not,
   can run Hermes slash commands (`allow_gateway_control=False`).
-- Revoking the runtime in Suite (or `Platform.Federation.revoke_runtime/1`)
+- Revoking the runtime in Burrow (or `Platform.Federation.revoke_runtime/1`)
   clears its token hash; the old token is then refused on reconnect.
 
 ## Development

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the Startup Suite channel plugin into a Hermes Agent home.
+# Install the Burrow channel plugin into a Hermes Agent home.
 #
 #   curl -fsSL <raw url>/install.sh | bash -s -- \
 #     --url wss://<host>/runtime/ws --runtime-id <id> [--hermes-home DIR] \
@@ -20,10 +20,11 @@
 #     every turn, and children it spawns without a scrub inherit that (README,
 #     "Security notes"). mcp-tokens/ is the directory Hermes's own file tools
 #     and media delivery refuse to read.
-#   - $HERMES_HOME/.env: SUITE_URL, SUITE_RUNTIME_ID, SUITE_RUNTIME_TOKEN_FILE
-#     (the path above; plus SUITE_ALLOW_ALL_USERS / SUITE_ALLOWED_USERS when
-#     asked); mode 0600. A SUITE_RUNTIME_TOKEN line from an older install is
-#     removed.
+#   - $HERMES_HOME/.env: BURROW_URL, BURROW_RUNTIME_ID, BURROW_RUNTIME_TOKEN_FILE
+#     (the path above; plus BURROW_ALLOW_ALL_USERS / BURROW_ALLOWED_USERS when
+#     asked), each ALSO written under its deprecated SUITE_ name so a
+#     downgrade to v0.2.0 still connects; mode 0600. A BURROW_RUNTIME_TOKEN or
+#     SUITE_RUNTIME_TOKEN line from an older install is removed.
 #   - the plugin `startup-suite-platform`, installed and enabled through
 #     `hermes plugins install` + `hermes plugins enable`;
 #   - config.yaml `mcp_servers.startup-suite`: a stdio server running the
@@ -44,8 +45,9 @@ readonly MCP_NAME="startup-suite"
 readonly TOKEN_RELPATH="mcp-tokens/startup-suite-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
 # Clone source when not run from a checkout. Precedence: --repo, then the
-# HERMES_SUITE_CHANNEL_REPO environment variable, then this default.
-readonly DEFAULT_REPO="${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}"
+# HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
+# HERMES_SUITE_CHANNEL_REPO, then this default.
+readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}}"
 readonly RESULT_LINE="hermes-suite-channel: installed"
 
 log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
@@ -54,18 +56,25 @@ die() {
   exit 1
 }
 
+# One stderr line when only the deprecated repo override is set.
+warn_deprecated_repo_env() {
+  if [ -z "${HERMES_BURROW_CHANNEL_REPO:-}" ] && [ -n "${HERMES_SUITE_CHANNEL_REPO:-}" ]; then
+    log "HERMES_SUITE_CHANNEL_REPO is deprecated; set HERMES_BURROW_CHANNEL_REPO (the old name still works)"
+  fi
+}
+
 usage() {
   cat >&2 <<'EOF'
 usage: install.sh --url wss://<host>/runtime/ws --runtime-id <id> [options]
 
-  --url URL            Suite runtime socket URL (ws:// or wss://, path /runtime/ws)
-  --runtime-id ID      the federated runtime id registered in Suite
+  --url URL            Burrow runtime socket URL (ws:// or wss://, path /runtime/ws)
+  --runtime-id ID      the federated runtime id registered in Burrow
   --hermes-home DIR    Hermes home (default: $HERMES_HOME, else ~/.hermes)
   --token-file PATH    read the runtime token from PATH (else stdin, else a prompt)
-  --mcp-url URL        Suite MCP endpoint (default: derived from --url, .../mcp)
-  --allow-all-users    write SUITE_ALLOW_ALL_USERS=true (Suite already limits
+  --mcp-url URL        Burrow MCP endpoint (default: derived from --url, .../mcp)
+  --allow-all-users    write BURROW_ALLOW_ALL_USERS=true (Burrow already limits
                        delivery to spaces the agent participates in)
-  --allowed-users CSV  write SUITE_ALLOWED_USERS=CSV (Suite display names)
+  --allowed-users CSV  write BURROW_ALLOWED_USERS=CSV (Burrow display names)
   --hermes BIN         the hermes executable (default: hermes on PATH)
   --python PATH        the interpreter that reads config.yaml and runs the MCP
                        bridge (default: the launcher's python shebang, else
@@ -88,7 +97,7 @@ EOF
 
 # ---------------------------------------------------------------- arguments
 
-SUITE_URL_ARG=""
+URL_ARG=""
 RUNTIME_ID_ARG=""
 HERMES_HOME_ARG=""
 TOKEN_FILE=""
@@ -113,8 +122,8 @@ parse_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --token | --token=*) refuse_token_arg ;;
-      --url) need_value "$@"; SUITE_URL_ARG="$2"; shift 2 ;;
-      --url=*) SUITE_URL_ARG="${1#*=}"; shift ;;
+      --url) need_value "$@"; URL_ARG="$2"; shift 2 ;;
+      --url=*) URL_ARG="${1#*=}"; shift ;;
       --runtime-id) need_value "$@"; RUNTIME_ID_ARG="$2"; shift 2 ;;
       --runtime-id=*) RUNTIME_ID_ARG="${1#*=}"; shift ;;
       --hermes-home) need_value "$@"; HERMES_HOME_ARG="$2"; shift 2 ;;
@@ -142,7 +151,7 @@ parse_args() {
     esac
   done
   [ "$PLUGIN_ONLY" = 0 ] || return 0
-  [ -n "$SUITE_URL_ARG" ] || { usage; die "--url is required"; }
+  [ -n "$URL_ARG" ] || { usage; die "--url is required"; }
   [ -n "$RUNTIME_ID_ARG" ] || { usage; die "--runtime-id is required"; }
 }
 
@@ -190,7 +199,7 @@ read_token() {
   elif script_is_a_file && [ ! -t 0 ]; then
     IFS= read -r TOKEN || true
   elif { : </dev/tty; } 2>/dev/null; then
-    printf 'Suite runtime token (input hidden): ' >/dev/tty
+    printf 'Burrow runtime token (input hidden): ' >/dev/tty
     IFS= read -rs TOKEN </dev/tty || true
     printf '\n' >/dev/tty
   else
@@ -235,6 +244,12 @@ env_set() {
     changed=1
   fi
   [ "$changed" = 0 ] || write_env "$out"
+}
+
+# BURROW_<SUFFIX> and SUITE_<SUFFIX> to the same value.
+env_set_both() {
+  env_set "BURROW_$1" "$2"
+  env_set "SUITE_$1" "$2"
 }
 
 # Remove every line defining KEY. Bash builtins only.
@@ -496,7 +511,7 @@ resolve_source() {
   SRC_DIR="$CLEANUP_DIR/src"
   log "cloning $REPO_URL"
   git clone --quiet "$REPO_URL" "$SRC_DIR" ||
-    die "could not clone $REPO_URL (private repository: authenticate git, e.g. gh auth setup-git, or pass the ssh form of $REPO_URL with --repo URL or HERMES_SUITE_CHANNEL_REPO=URL)"
+    die "could not clone $REPO_URL (private repository: authenticate git, e.g. gh auth setup-git, or pass the ssh form of $REPO_URL with --repo URL or HERMES_BURROW_CHANNEL_REPO=URL)"
   if [ -n "$REF_ARG" ]; then
     git -C "$SRC_DIR" checkout --quiet --detach "$REF_ARG" || die "no such commit: $REF_ARG"
   fi
@@ -624,6 +639,7 @@ register_mcp() {
 
 main() {
   parse_args "$@"
+  warn_deprecated_repo_env
   HERMES_HOME="${HERMES_HOME_ARG:-${HERMES_HOME:-$HOME/.hermes}}"
   export HERMES_HOME
   command -v "$HERMES_BIN" >/dev/null 2>&1 ||
@@ -635,10 +651,10 @@ main() {
     return 0
   fi
 
-  check_env_value SUITE_URL "$SUITE_URL_ARG"
-  check_env_value SUITE_RUNTIME_ID "$RUNTIME_ID_ARG"
-  [ -z "$ALLOWED_USERS" ] || check_env_value SUITE_ALLOWED_USERS "$ALLOWED_USERS"
-  MCP_URL="${MCP_URL_ARG:-$(derive_mcp_url "$SUITE_URL_ARG")}"
+  check_env_value BURROW_URL "$URL_ARG"
+  check_env_value BURROW_RUNTIME_ID "$RUNTIME_ID_ARG"
+  [ -z "$ALLOWED_USERS" ] || check_env_value BURROW_ALLOWED_USERS "$ALLOWED_USERS"
+  MCP_URL="${MCP_URL_ARG:-$(derive_mcp_url "$URL_ARG")}"
   check_env_value "--mcp-url" "$MCP_URL"
 
   read_token
@@ -646,7 +662,7 @@ main() {
   mkdir -p "$HERMES_HOME"
   ENV_FILE="$HERMES_HOME/.env"
   TOKEN_PATH="$HERMES_HOME/$TOKEN_RELPATH"
-  check_env_value SUITE_RUNTIME_TOKEN_FILE "$TOKEN_PATH"
+  check_env_value BURROW_RUNTIME_TOKEN_FILE "$TOKEN_PATH"
 
   find_hermes_python
   resolve_source
@@ -656,14 +672,17 @@ main() {
   TOKEN=""
 
   # The env keys go in first: `hermes plugins install` prompts for any
-  # requires_env variable that is still unset.
-  env_set SUITE_URL "$SUITE_URL_ARG"
-  env_set SUITE_RUNTIME_ID "$RUNTIME_ID_ARG"
-  env_set SUITE_RUNTIME_TOKEN_FILE "$TOKEN_PATH"
+  # requires_env variable that is still unset (v0.2.0's plugin.yaml lists
+  # the SUITE_ names). Every key is written under BOTH names: the plugin reads
+  # BURROW_ first, and v0.2.0 reads only SUITE_, so a downgrade still works.
+  env_set_both URL "$URL_ARG"
+  env_set_both RUNTIME_ID "$RUNTIME_ID_ARG"
+  env_set_both RUNTIME_TOKEN_FILE "$TOKEN_PATH"
+  env_unset BURROW_RUNTIME_TOKEN
   env_unset SUITE_RUNTIME_TOKEN
-  [ -z "$ALLOW_ALL" ] || env_set SUITE_ALLOW_ALL_USERS "$ALLOW_ALL"
-  [ -z "$ALLOWED_USERS" ] || env_set SUITE_ALLOWED_USERS "$ALLOWED_USERS"
-  [ "$ENV_CHANGED" = 0 ] || log "wrote Suite settings to $ENV_FILE (mode 0600)"
+  [ -z "$ALLOW_ALL" ] || env_set_both ALLOW_ALL_USERS "$ALLOW_ALL"
+  [ -z "$ALLOWED_USERS" ] || env_set_both ALLOWED_USERS "$ALLOWED_USERS"
+  [ "$ENV_CHANGED" = 0 ] || log "wrote Burrow settings to $ENV_FILE (mode 0600)"
   chmod 600 "$ENV_FILE"
 
   install_plugin
