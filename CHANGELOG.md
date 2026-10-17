@@ -2,6 +2,7 @@
 
 ## v0.3.0
 
+- update.sh (and install.sh over an existing install) works on a host whose plugin is enabled. Hermes refuses to replace an enabled plugin that declares Python dependencies without a terminal user's consent ("Reinstall declined: dependency install skipped (non-interactive)"), which made update.sh (v0.2.0 and the earlier v0.3.0 work) exit 1 on an enabled host (measured at hermes-agent fdec926e in its default home and in a live profile). The installer now disables, reinstalls with `--no-enable`, and enables; any failure after the disable re-enables the plugin at the build still installed.
 - Burrow names. Every env setting is read as `BURROW_<X>` first and the deprecated `SUITE_<X>` second, with one warning per old name used (the list is `ENV_FALLBACKS` in `hermes_suite_channel/config.py`). An install whose `.env` holds only `SUITE_` names keeps working after `update.sh`, unedited.
 - install.sh writes every key under both names, so a downgrade to v0.2.0 still connects; uninstall.sh removes both spellings and nothing else. `HERMES_BURROW_CHANNEL_REPO` is read before `HERMES_SUITE_CHANNEL_REPO`.
 - The allowlist, allow-all and cron home-channel names Hermes reads itself are registered as the spelling the host sets (see README "Env names").

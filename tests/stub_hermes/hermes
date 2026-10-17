@@ -21,6 +21,9 @@ parents it leaves empty, `config set` coerces a JSON list value to a list.
 HERMES_STUB_VENV=DIR makes `--run-module pm.environments` answer with DIR as the
 selected dependency venv (the launcher interface of fdec926e); unset, it fails.
 HERMES_STUB_FAIL_INSTALL=1 makes `plugins install` fail (the copy-fallback test).
+`plugins install` over an ENABLED plugin with stdin or stdout not a TTY is
+refused with the real CLI's "Reinstall declined" error, always, as
+plugins_transaction.publish_plugin does for a plugin declaring Python deps.
 HERMES_STUB_SCAN=caution|dangerous makes `plugins install` print the real CLI's
 scan verdict line and refuse, as the real CLI does non-interactively; --force
 overrides caution, never dangerous (tools/plugin_guard.py).
@@ -145,6 +148,10 @@ def plugins(args: list[str]) -> None:
         enabled = list(lookup(data, "plugins.enabled"))
     except KeyError:
         enabled = []
+    try:
+        disabled = list(lookup(data, "plugins.disabled"))
+    except KeyError:
+        disabled = []
     if verb == "install":
         src = rest[0]
         ref = rest[rest.index("--ref") + 1] if "--ref" in rest else "HEAD"
@@ -162,26 +169,38 @@ def plugins(args: list[str]) -> None:
         target = home() / "plugins" / name
         if target.exists() and "--force" not in rest:
             fail(f"Plugin '{name}' already exists.")
+        # Staged first, like the real CLI: a refused install leaves the
+        # installed tree as it was.
+        archive = subprocess.run(["git", "-C", repo, "archive", ref], capture_output=True)
+        if archive.returncode != 0:
+            fail(f"Error: stub could not check out {ref}")
+        # hermes_cli/plugins_transaction.py publish_plugin(require_consent=True):
+        # replacing an ENABLED plugin that declares Python dependencies needs a
+        # terminal user's consent; with stdin or stdout not a TTY it is refused.
+        if target.exists() and name in enabled and not (os.isatty(0) and os.isatty(1)):
+            fail(
+                f"Error: Plugin '{name}' was not published: Reinstall declined: dependency "
+                "install skipped (non-interactive). The installed plugin and active "
+                "environment are unchanged."
+            )
         subprocess.run(["rm", "-rf", str(target)], check=True)
         target.mkdir(parents=True)
-        archive = subprocess.run(
-            ["git", "-C", repo, "archive", ref], check=True, capture_output=True
-        ).stdout
-        subprocess.run(["tar", "-x", "-C", str(target)], input=archive, check=True)
+        subprocess.run(["tar", "-x", "-C", str(target)], input=archive.stdout, check=True)
         meta = metadata()
         meta[name] = {"source": src, "revision": ref, "pinned": "--ref" in rest}
         save_metadata(meta)
         print(f"Plugin installed: {src}")
     elif verb == "enable":
-        if rest[0] not in enabled:
-            assign(data, "plugins.enabled", enabled + [rest[0]])
-            if "disabled" not in data["plugins"]:
-                data["plugins"]["disabled"] = []
+        if rest[0] not in enabled or rest[0] in disabled:
+            assign(data, "plugins.enabled", [n for n in enabled if n != rest[0]] + [rest[0]])
+            data["plugins"]["disabled"] = [n for n in disabled if n != rest[0]]
             write_config(data)
     elif verb == "disable":
-        if rest[0] in enabled:
+        # Measured against the real CLI: `enabled: []`, `disabled: [name]`,
+        # no _config_version; a following enable gives the bytes back.
+        if rest[0] in enabled or rest[0] not in disabled:
             assign(data, "plugins.enabled", [n for n in enabled if n != rest[0]])
-            data["_config_version"] = CONFIG_VERSION
+            data["plugins"]["disabled"] = [n for n in disabled if n != rest[0]] + [rest[0]]
             write_config(data)
     elif verb == "remove":
         meta = metadata()
@@ -190,7 +209,12 @@ def plugins(args: list[str]) -> None:
         subprocess.run(["rm", "-rf", str(home() / "plugins" / rest[0])], check=True)
         del meta[rest[0]]
         save_metadata(meta)
-        plugins(["disable", rest[0]])
+        if rest[0] in enabled or rest[0] in disabled:  # _forget_plugin_config: both lists
+            assign(data, "plugins.enabled", [n for n in enabled if n != rest[0]])
+            if rest[0] in disabled:
+                data["plugins"]["disabled"] = [n for n in disabled if n != rest[0]]
+            data["_config_version"] = CONFIG_VERSION
+            write_config(data)
     else:
         fail(f"stub: unsupported plugins verb {verb}")
 
@@ -236,7 +260,9 @@ def main() -> None:
         if not venv:
             fail("RuntimeError: no committed dependency environment")
         env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(["/stub/hermes-agent", f"{venv}/lib/python3.14/site-packages"])
+        env["PYTHONPATH"] = os.pathsep.join(
+            ["/stub/hermes-agent", f"{venv}/lib/python3.14/site-packages"]
+        )
         print(json.dumps(env))
     elif args[:1] == ["plugins"]:
         plugins(args[1:])

@@ -725,6 +725,153 @@ def test_update_refuses_when_not_installed(checkout, home, env):
     assert proc.returncode != 0 and "run install.sh first" in proc.stderr
 
 
+# ------------------------------------- reinstall over an ENABLED plugin
+#
+# hermes-agent fdec926e refuses to replace an enabled plugin that declares
+# Python dependencies unless a terminal user consents (plugins_transaction.py
+# publish_plugin(require_consent=True)), and every Hermes child install.sh
+# runs has stdin on /dev/null: "Reinstall declined: dependency install
+# skipped (non-interactive)". The stub reproduces that refusal; install.sh
+# disables, installs, and enables again.
+
+# The block that does the disable, cut out to build the installer the
+# positive controls run. Keyed on the two lines that open and close it.
+DISABLE_OPEN = '    if [ -e "$(plugin_dir)" ] && plugin_enabled; then\n'
+DISABLE_CLOSE = "      REENABLE_ON_EXIT=1\n    fi\n"
+
+
+def without_disable_step(text: str) -> str:
+    start = text.index(DISABLE_OPEN)
+    end = text.index(DISABLE_CLOSE, start) + len(DISABLE_CLOSE)
+    out = text[:start] + text[end:]
+    assert "run_hermes plugins disable" not in out
+    return out
+
+
+def _commit_next(checkout: Path, name: str = "NEWFILE") -> str:
+    (checkout / name).write_text("x\n")
+    _git(checkout, "add", name)
+    _git(checkout, "commit", "-q", "-m", "next")
+    return _git(checkout, "rev-parse", "HEAD")
+
+
+def _plugin_verbs(env) -> list[str]:
+    return [c[1] for c in stub_calls(env) if c[:1] == ["plugins"]]
+
+
+def _build(home: Path) -> str:
+    f = home / "plugins" / "startup-suite-platform" / "hermes_suite_channel" / "_build.py"
+    return f.read_text().split('BUILD = "')[1].split('"')[0]
+
+
+def _enabled(home: Path) -> list[str]:
+    return list((config(home).get("plugins") or {}).get("enabled") or [])
+
+
+def test_update_over_an_enabled_plugin_disables_installs_enables(checkout, home, env, token):
+    assert install(checkout, home, env, token).returncode == 0
+    cfg_before = (home / "config.yaml").read_bytes()
+    Path(env["HERMES_STUB_LOG"]).unlink()
+    new_sha = _commit_next(checkout)
+
+    proc = run(checkout / "update.sh", "--hermes-home", str(home), env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == UPDATED
+    assert _plugin_verbs(env) == ["disable", "install", "enable"]
+    installs = _install_calls(env)
+    assert len(installs) == 1 and "--force" in installs[0] and "--no-enable" in installs[0]
+    assert _build(home) == new_sha
+    assert _enabled(home) == ["startup-suite-platform"]
+    # disable + enable give config.yaml back byte for byte (real CLI measured
+    # the same; the stub mirrors it).
+    assert (home / "config.yaml").read_bytes() == cfg_before
+
+
+def test_update_without_the_disable_step_is_declined(tmp_path, home, env, token):
+    """Positive control: the installer before this fix (the disable block cut
+    out) fails on the same host with Hermes's refusal and leaves the old
+    build, so the test above is measuring the disable step."""
+    co = _make_checkout(
+        tmp_path / "control", install_sh=without_disable_step((ROOT / "install.sh").read_text())
+    )
+    assert install(co, home, env, token).returncode == 0
+    old_sha = _build(home)
+    _commit_next(co)
+    proc = run(co / "update.sh", "--hermes-home", str(home), env=env)
+    assert proc.returncode != 0
+    assert "Reinstall declined: dependency install skipped (non-interactive)" in proc.stderr
+    assert _build(home) == old_sha
+
+
+def test_failed_reinstall_re_enables_the_old_version(checkout, home, env, token):
+    assert install(checkout, home, env, token).returncode == 0
+    old_sha = _build(home)
+    cfg_before = (home / "config.yaml").read_bytes()
+    Path(env["HERMES_STUB_LOG"]).unlink()
+    _commit_next(checkout)
+
+    proc = run(
+        checkout / "update.sh",
+        "--hermes-home",
+        str(home),
+        env={**env, "HERMES_STUB_FAIL_INSTALL": "1"},
+    )
+    assert proc.returncode != 0
+    assert last_line(proc) != UPDATED
+    verbs = _plugin_verbs(env)
+    assert verbs[0] == "disable" and verbs[-1] == "enable" and "install" in verbs
+    assert "re-enabled" in proc.stderr
+    assert _build(home) == old_sha
+    assert not (home / "plugins" / "startup-suite-platform" / "NEWFILE").exists()
+    assert _enabled(home) == ["startup-suite-platform"]
+    assert (home / "config.yaml").read_bytes() == cfg_before
+
+
+def test_re_enable_check_fires_without_the_trap(tmp_path, home, env, token):
+    """Mutation: with the exit-trap re-enable removed, the same failure leaves
+    the plugin disabled, which the test above would catch."""
+    text = (ROOT / "install.sh").read_text()
+    mutated = text.replace("    reenable_after_failure || true\n", "    true\n")
+    assert mutated != text
+    co = _make_checkout(tmp_path / "mutant", install_sh=mutated)
+    assert install(co, home, env, token).returncode == 0
+    _commit_next(co)
+    proc = run(
+        co / "update.sh", "--hermes-home", str(home), env={**env, "HERMES_STUB_FAIL_INSTALL": "1"}
+    )
+    assert proc.returncode != 0
+    assert _enabled(home) == []
+
+
+def test_unknown_ref_fails_before_any_disable(checkout, home, env, token):
+    assert install(checkout, home, env, token).returncode == 0
+    Path(env["HERMES_STUB_LOG"]).unlink()
+    proc = run(
+        checkout / "update.sh",
+        "--hermes-home",
+        str(home),
+        "--ref",
+        "0123456789abcdef0123456789abcdef01234567",
+        env=env,
+    )
+    assert proc.returncode != 0 and "no such commit" in proc.stderr
+    assert "disable" not in _plugin_verbs(env)
+    assert _enabled(home) == ["startup-suite-platform"]
+
+
+def test_update_of_a_disabled_plugin_does_not_disable_first(checkout, home, env, token):
+    """The path for a plugin that is installed but not enabled is unchanged:
+    install --force, then enable."""
+    assert install(checkout, home, env, token).returncode == 0
+    subprocess.run(["hermes", "plugins", "disable", "startup-suite-platform"], env=env, check=True)
+    Path(env["HERMES_STUB_LOG"]).unlink()
+    new_sha = _commit_next(checkout)
+    proc = run(checkout / "update.sh", "--hermes-home", str(home), env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert _plugin_verbs(env) == ["install", "enable"]
+    assert _build(home) == new_sha and _enabled(home) == ["startup-suite-platform"]
+
+
 # ----------------------------------------------------- config.yaml round trip
 
 
@@ -949,36 +1096,189 @@ def test_uninstall_through_a_sh_launcher(checkout, home, env, token, tmp_path):
 
 
 # --------------------------------------------------------- the REAL hermes
+#
+# HERMES_REAL_BIN: a real `hermes` (hermes-agent fdec926e in the recorded
+# runs). A pm-installed Hermes keeps its dependency environment under its
+# ROOT home and refuses a HERMES_HOME outside it ("dependency environment is
+# missing or outside this install"), and a bare directory under the root is
+# not a live profile, so Hermes's consent gate never sees its plugins. Each
+# test therefore gets its own LIVE profile (`hermes profile create`), deleted
+# afterwards. That writes into the Hermes root, so it also needs
+# HERMES_REAL_ROOT_IS_DISPOSABLE=1: never point these at a Hermes you use.
 
 REAL_HERMES = os.environ.get("HERMES_REAL_BIN")
+REAL_OK = bool(REAL_HERMES) and os.environ.get("HERMES_REAL_ROOT_IS_DISPOSABLE") == "1"
+real = pytest.mark.skipif(
+    not REAL_OK,
+    reason="needs HERMES_REAL_BIN (a real hermes) and HERMES_REAL_ROOT_IS_DISPOSABLE=1",
+)
+# install.sh at dd199a01, the tip the behavioural gate failed on, when this
+# clone has that commit.
+PRE_FIX = "dd199a01aa5d3dd1ef49957c83e4d5c12752f233"
 
 
-@pytest.mark.skipif(not REAL_HERMES, reason="HERMES_REAL_BIN (a real hermes executable) not set")
-def test_round_trip_with_the_real_hermes_cli(checkout, tmp_path, token):
-    """Same round trip against hermes-agent itself (fdec926e in the recorded
-    run): config.yaml returns to its original sha256 after install, reinstall
-    and uninstall, and the reinstall sets nothing."""
-    home = tmp_path / "real-home"
-    home.mkdir()
+def _real_env(home: Path | None = None) -> dict:
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("HERMES_HOME", "HERMES_SUITE_CHANNEL_REPO", "HERMES_BURROW_CHANNEL_REPO")
+    }
+    env["PATH"] = f"{Path(REAL_HERMES).parent}{os.pathsep}{os.environ['PATH']}"
+    if home is not None:
+        env["HERMES_HOME"] = str(home)
+    return env
+
+
+def _real_hermes(*args: str, home: Path | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [REAL_HERMES, *args],
+        env=_real_env(home),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+
+
+@pytest.fixture
+def real_home():
+    # ONE real test per Hermes root. Measured at fdec926e: after one profile
+    # enabled this plugin and was removed and deleted, a second profile's
+    # `hermes plugins enable` fails ("uv lock ... Distribution not found at
+    # .../plugin-sources/startup-suite-platform-<id>"), with or without
+    # `plugins remove` first. Run each @real test against a fresh root
+    # (e.g. one container per test, `pytest -k <name>`); a second one fails
+    # here, by name, instead of with that error.
+    root = Path(_real_hermes("profile", "show", "default").stdout.split("Path:", 1)[-1].split()[0])
+    marker = root / ".burrow-channel-real-test"
+    if marker.exists():
+        pytest.fail(f"a real-Hermes test already ran against {root}: {marker.read_text()}")
+    marker.write_text(os.environ.get("PYTEST_CURRENT_TEST", "?") + "\n")
+    name = "bct" + secrets.token_hex(4)
+    made = _real_hermes("profile", "create", name, "--no-alias", "--no-skills")
+    assert made.returncode == 0, made.stdout + made.stderr
+    shown = _real_hermes("profile", "show", name).stdout
+    home = Path(
+        next(ln.split(":", 1)[1].strip() for ln in shown.splitlines() if ln.startswith("Path:"))
+    )
+    assert home.is_dir()
     (home / "config.yaml").write_text(PRE_CONFIG)
     (home / ".env").write_text(PRE_ENV)
+    try:
+        yield home
+    finally:
+        _real_hermes("plugins", "remove", "startup-suite-platform", home=home)
+        _real_hermes("profile", "delete", "-y", name)
+
+
+def _real_enabled(home: Path) -> list[str]:
+    out = _real_hermes("config", "get", "plugins.enabled", "--json", home=home)
+    return json.loads(out.stdout) if out.returncode == 0 else []
+
+
+def _real_install(co: Path, home: Path, token: str):
+    return install(co, home, _real_env(home), token)
+
+
+def _real_update(co: Path, home: Path, *extra: str):
+    return run(co / "update.sh", "--hermes-home", str(home), *extra, env=_real_env(home))
+
+
+@real
+@pytest.mark.xfail(
+    strict=True,
+    reason="pre-existing, measured at hermes-agent fdec926e: enabling the plugin moves Hermes PM "
+    "to a new dependency environment, so the second install re-sets "
+    "mcp_servers.startup-suite.command to the new environments/<id>/venv python",
+)
+def test_round_trip_with_the_real_hermes_cli(checkout, real_home, token):
+    """Same round trip against hermes-agent itself: config.yaml returns to its
+    original sha256 after install, reinstall and uninstall, and the reinstall
+    sets nothing."""
+    home = real_home
     pre_cfg, pre_env = sha(home / "config.yaml"), sha(home / ".env")
-    env = {
-        **os.environ,
-        "PATH": f"{Path(REAL_HERMES).parent}{os.pathsep}{os.environ['PATH']}",
-        "HERMES_HOME": str(home),
-    }
-    first = install(checkout, home, env, token)
+    first = _real_install(checkout, home, token)
     assert first.returncode == 0, first.stderr
     assert token not in (home / "config.yaml").read_text() + (home / ".env").read_text()
-    second = install(checkout, home, env, token)
+    second = _real_install(checkout, home, token)
     assert second.returncode == 0, second.stderr
     assert set_lines(second) == []
-    un = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env)
+    un = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=_real_env(home))
     assert un.returncode == 0, un.stderr
     assert sha(home / "config.yaml") == pre_cfg, (home / "config.yaml").read_text()
     assert sha(home / ".env") == pre_env
     assert not token_path(home).exists() and not (home / ".suite-channel").exists()
+
+
+def _pre_fix_install_sh() -> str | None:
+    got = subprocess.run(
+        ["git", "-C", str(ROOT), "show", f"{PRE_FIX}:install.sh"], capture_output=True, text=True
+    )
+    return got.stdout if got.returncode == 0 else None
+
+
+@real
+@pytest.mark.parametrize("which", ["dd199a01", "disable_cut"])
+def test_real_hermes_declines_the_reinstall_without_the_disable_step(
+    tmp_path, real_home, token, which
+):
+    """Positive control on the REAL CLI: an enabled plugin, upgraded by an
+    installer that does not disable it first (dd199a01's own install.sh, and
+    this one with the disable block cut out), is refused and stays on the old
+    build."""
+    if which == "dd199a01":
+        text = _pre_fix_install_sh()
+        if text is None:
+            pytest.skip(f"{PRE_FIX} not in this clone")
+    else:
+        text = without_disable_step((ROOT / "install.sh").read_text())
+    co = _make_checkout(tmp_path / "control", install_sh=text)
+    assert _real_install(co, real_home, token).returncode == 0
+    old_sha = _build(real_home)
+    _commit_next(co)
+    proc = _real_update(co, real_home)
+    assert proc.returncode != 0
+    assert "Reinstall declined: dependency install skipped (non-interactive)" in proc.stderr
+    assert _build(real_home) == old_sha
+    assert _real_enabled(real_home) == ["startup-suite-platform"]
+
+
+@real
+def test_real_hermes_update_over_an_enabled_plugin(checkout, real_home, token):
+    assert _real_install(checkout, real_home, token).returncode == 0
+    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    cfg_before = (real_home / "config.yaml").read_bytes()
+    env_before = (real_home / ".env").read_bytes()
+    new_sha = _commit_next(checkout)
+    proc = _real_update(checkout, real_home)
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == UPDATED
+    assert _build(real_home) == new_sha
+    assert (real_home / "plugins" / "startup-suite-platform" / "NEWFILE").is_file()
+    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    assert (real_home / "config.yaml").read_bytes() == cfg_before
+    assert (real_home / ".env").read_bytes() == env_before
+
+
+@real
+def test_real_hermes_refused_reinstall_re_enables_the_old_version(checkout, real_home, token):
+    """Hermes refuses the new tree AFTER install.sh disabled the plugin (a
+    plugin.yaml with a manifest_version this Hermes does not support): the
+    run fails, and the plugin is enabled again at the build it had."""
+    assert _real_install(checkout, real_home, token).returncode == 0
+    old_sha = _build(real_home)
+    cfg_before = (real_home / "config.yaml").read_bytes()
+    manifest = checkout / "plugin.yaml"
+    manifest.write_text("manifest_version: 999\n" + manifest.read_text())
+    _git(checkout, "commit", "-q", "-am", "a manifest Hermes refuses")
+    proc = _real_update(checkout, real_home)
+    assert proc.returncode != 0
+    assert "disabling plugin startup-suite-platform" in proc.stderr
+    assert "manifest_version 999" in proc.stderr
+    assert "re-enabled" in proc.stderr
+    assert _build(real_home) == old_sha
+    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    assert (real_home / "config.yaml").read_bytes() == cfg_before
 
 
 def test_an_env_file_the_install_created_is_removed_when_empty(checkout, home, env, token):

@@ -482,7 +482,28 @@ SRC_DIR=""
 SRC_SHA=""
 SRC_URL=""
 CLEANUP_DIR=""
-cleanup() { [ -z "$CLEANUP_DIR" ] || rm -rf "$CLEANUP_DIR"; }
+# 1 between `hermes plugins disable` (for a reinstall over an enabled plugin)
+# and the `hermes plugins enable` that follows it. Any exit in that window,
+# a die() included, re-enables the plugin at whatever version is on disk:
+# Hermes leaves the installed tree unchanged when it refuses an install, so
+# that is the version that was running. An upgrade attempt must never leave a
+# working host with its channel disabled.
+REENABLE_ON_EXIT=0
+reenable_after_failure() {
+  log "re-enabling plugin $PLUGIN_NAME at the version still installed ($(stamped_build || true))"
+  if run_hermes plugins enable "$PLUGIN_NAME" >&2 && plugin_enabled; then
+    log "plugin $PLUGIN_NAME re-enabled; the host is as it was before this run"
+  else
+    log "error: could not re-enable plugin $PLUGIN_NAME; run: hermes plugins enable $PLUGIN_NAME"
+  fi
+}
+cleanup() {
+  if [ "$REENABLE_ON_EXIT" = 1 ]; then
+    REENABLE_ON_EXIT=0
+    reenable_after_failure || true
+  fi
+  [ -z "$CLEANUP_DIR" ] || rm -rf "$CLEANUP_DIR"
+}
 trap cleanup EXIT
 
 resolve_source() {
@@ -578,6 +599,18 @@ install_plugin() {
   else
     local force=()
     [ ! -e "$(plugin_dir)" ] || force=(--force)
+    # Hermes (hermes-agent fdec926e, plugins_transaction.publish_plugin)
+    # refuses to replace an ENABLED plugin that declares Python dependencies
+    # unless a terminal user consents, and every Hermes child here runs with
+    # stdin on /dev/null: "Reinstall declined: dependency install skipped
+    # (non-interactive)". `hermes plugins install` has no consent flag. A
+    # disabled plugin's dependencies are admitted by `hermes plugins enable`
+    # instead, which needs no terminal, so: disable, install, enable.
+    if [ -e "$(plugin_dir)" ] && plugin_enabled; then
+      log "disabling plugin $PLUGIN_NAME for the reinstall (Hermes refuses to replace an enabled plugin non-interactively); it is re-enabled below, or on any failure"
+      run_hermes plugins disable "$PLUGIN_NAME" >&2 || die "hermes plugins disable $PLUGIN_NAME failed"
+      REENABLE_ON_EXIT=1
+    fi
     log "installing plugin $PLUGIN_NAME at $SRC_SHA"
     if ! try_install "$SRC_URL" ${force[@]+"${force[@]}"}; then
       if [ "$SRC_URL" != "file://$SRC_DIR" ] &&
@@ -599,6 +632,7 @@ install_plugin() {
     run_hermes plugins enable "$PLUGIN_NAME" >&2 || die "hermes plugins enable $PLUGIN_NAME failed"
     plugin_enabled || die "plugin $PLUGIN_NAME is still not enabled after hermes plugins enable"
   fi
+  REENABLE_ON_EXIT=0
 }
 
 # Set KEY to VALUE unless the raw YAML already holds it. VALUE is a string or

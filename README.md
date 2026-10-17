@@ -77,6 +77,21 @@ Two install details that were measured, not assumed (hermes-agent fdec926e):
   ("dependency install skipped (non-interactive)"). `hermes plugins enable`
   run non-interactively does resolve and install them, so install.sh installs
   with `--no-enable` and then enables.
+- **Replacing an ENABLED plugin needs a disable first.** `hermes plugins
+  install --force` over an enabled plugin that declares Python dependencies
+  asks a terminal user to consent (`plugins_transaction.publish_plugin`), and
+  without one it refuses: "Reinstall declined: dependency install skipped
+  (non-interactive)". There is no consent flag. So when the plugin is already
+  enabled, install.sh (and so update.sh) runs `hermes plugins disable`, then
+  `hermes plugins install --force --no-enable`, then `hermes plugins enable`.
+  If anything fails after the disable, the exit trap enables the plugin again
+  at the build still on disk (Hermes leaves the installed tree unchanged when
+  it refuses), so a failed upgrade never leaves the channel disabled. Measured
+  on the real CLI: the disable/enable pair gives `config.yaml` back byte for
+  byte. Hermes hosts in its default home and in live profiles both hit the
+  refusal; a bare directory used as `HERMES_HOME` under the root (not a
+  profile Hermes lists) does not, because its plugins are outside Hermes's
+  dependency union.
 - **Private repository.** `hermes plugins install` accepts `file://` sources
   (with a warning) and `--ref <40-char sha>`. Run from a checkout, install.sh
   installs `file://<checkout>` at its HEAD. Without a checkout it clones
@@ -179,7 +194,8 @@ curl -fsSL <raw url>/update.sh | bash -s -- [--ref SHA]
 Like `burrow-channel-openclaw`'s update.sh: it refreshes the plugin files and
 preserves the configuration. `.env` and the MCP entry are not touched and the
 token is not read. It runs `install.sh --plugin-only`, which reinstalls with
-`--force --ref <sha>` and restamps `_build.py`. Restart the gateway afterwards.
+`--force --ref <sha>` (disabling an enabled plugin around it, see above) and
+restamps `_build.py`. Restart the gateway afterwards.
 Because it leaves the configuration alone, it does NOT move an older install's
 token out of `.env`; re-run install.sh for that.
 
@@ -547,9 +563,17 @@ export HERMES_AGENT_SRC=$PWD/../hermes-agent
 .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest
 ```
 
-With `HERMES_REAL_BIN=/path/to/hermes` set, one more installer test runs the
-round trip against the real CLI in a temp `HERMES_HOME`; without it that test
-reports as skipped.
+With `HERMES_REAL_BIN=/path/to/hermes` and `HERMES_REAL_ROOT_IS_DISPOSABLE=1`
+set, the installer tests marked `@real` run against the real CLI, each in a
+fresh live profile it creates and deletes in that Hermes's root. They write
+into the root, so never point them at a Hermes you use. Run ONE of them per
+fresh root (one container per test, `pytest -k <name>`): after one profile
+enabled the plugin, a second profile's enable fails in Hermes PM ("uv lock
+... Distribution not found"), so the fixture refuses a second test by name.
+Without both variables they report as skipped.
+`test_round_trip_with_the_real_hermes_cli` is a strict xfail: enabling the
+plugin moves Hermes PM to a new dependency environment, so a second install
+re-sets `mcp_servers.startup-suite.command` to the new venv's python.
 
 The adapter tests run against the REAL hermes-agent gateway (base adapter,
 `MessageEvent`, `PlatformEntry`, the plugin loader, and the stream consumer),
