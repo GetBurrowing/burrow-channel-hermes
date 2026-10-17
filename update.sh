@@ -2,7 +2,7 @@
 # Update an installed Burrow channel plugin to this checkout's HEAD
 # (or, outside a checkout, to --ref / the default branch of --repo).
 #
-# Mirrors openclaw-suite-channel's update.sh: it refreshes the plugin files
+# Mirrors burrow-channel-openclaw's update.sh: it refreshes the plugin files
 # only and preserves the configuration. .env (URL, runtime id, token) and the
 # MCP entry are left untouched; the token is not needed and not read.
 #
@@ -17,7 +17,7 @@ readonly PLUGIN_NAME="startup-suite-platform"
 # Clone source when not run from a checkout. Precedence: --repo, then the
 # HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
 # HERMES_SUITE_CHANNEL_REPO, then this default.
-readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}}"
+readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/burrow-channel-hermes.git}}"
 readonly RESULT_LINE="hermes-suite-channel: updated"
 
 log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }

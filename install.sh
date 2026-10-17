@@ -47,7 +47,7 @@ readonly RECORD_RELDIR=".suite-channel"
 # Clone source when not run from a checkout. Precedence: --repo, then the
 # HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
 # HERMES_SUITE_CHANNEL_REPO, then this default.
-readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}}"
+readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/burrow-channel-hermes.git}}"
 readonly RESULT_LINE="hermes-suite-channel: installed"
 
 log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }

@@ -369,7 +369,24 @@ def test_piped_script_does_not_read_the_token_from_stdin(checkout, home, env, to
 
 # ------------------------------------------------- install source repository
 
-DEFAULT_REPO_URL = "https://github.com/Startup-Suite/hermes-suite-channel.git"
+# A raw literal, not read from the scripts, so a default that drifts in either
+# script fails here rather than being echoed back.
+DEFAULT_REPO_URL = "https://github.com/Startup-Suite/burrow-channel-hermes.git"
+
+
+@pytest.mark.parametrize("script", ["install.sh", "update.sh"])
+def test_default_repo_names_burrow_channel_hermes(script):
+    lines = [
+        ln
+        for ln in (ROOT / script).read_text().splitlines()
+        if ln.startswith("readonly DEFAULT_REPO=")
+    ]
+    assert lines == [
+        'readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-'
+        + DEFAULT_REPO_URL
+        + '}}"'
+    ]
+    assert "hermes-suite-channel.git" not in (ROOT / script).read_text()
 
 
 def _piped(script_path: Path, args: list[str], env: dict, stdin_extra: str = ""):
@@ -433,6 +450,38 @@ def test_repo_default_is_unchanged_without_flag_or_env(checkout, home, env, toke
     assert "Startup-Suite" not in proc.stderr.split("could not clone", 1)[1].replace(
         DEFAULT_REPO_URL, ""
     )
+
+
+def test_update_repo_default_without_flag_or_env(checkout, home, env, token, tmp_path):
+    assert install(checkout, home, env, token).returncode == 0
+    env = {
+        k: v
+        for k, v in env.items()
+        if k not in ("HERMES_SUITE_CHANNEL_REPO", "HERMES_BURROW_CHANNEL_REPO")
+    }
+    # Never touch the network: refuse every transport but file://.
+    env["GIT_ALLOW_PROTOCOL"] = "file"
+    proc = _piped(checkout / "update.sh", ["--hermes-home", str(home)], env)
+    assert proc.returncode != 0
+    assert f"could not clone {DEFAULT_REPO_URL}" in proc.stderr
+
+
+def test_update_burrow_repo_env_var_beats_the_suite_one(checkout, home, env, token, tmp_path):
+    assert install(checkout, home, env, token).returncode == 0
+    bogus = tmp_path / "no-such-repo"
+    proc = _piped(
+        checkout / "update.sh",
+        ["--hermes-home", str(home)],
+        {
+            **env,
+            "HERMES_BURROW_CHANNEL_REPO": str(checkout),
+            "HERMES_SUITE_CHANNEL_REPO": str(bogus),
+        },
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == UPDATED
+    assert str(bogus) not in proc.stderr
+    assert "deprecated" not in proc.stderr
 
 
 def test_update_resolves_the_env_var_and_passes_it_on(checkout, home, env, token, tmp_path):

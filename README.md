@@ -1,10 +1,13 @@
-# hermes-suite-channel
+# burrow-channel-hermes
 
 Hermes Agent (Nous Research, https://github.com/NousResearch/hermes-agent)
 platform plugin for Burrow federation. A sibling of
-`claude-code-suite-channel` and `openclaw-suite-channel`: the same runtime
+`burrow-channel-claude-code` and `burrow-channel-openclaw`: the same runtime
 socket, runtime id and token, with Burrow attention events delivered into a
-Hermes session and replies pushed back.
+Hermes session and replies pushed back. The repository is
+`burrow-channel-hermes` (formerly `hermes-suite-channel`; GitHub redirects the
+old URL). The Python distribution name and the installer result lines keep the
+`hermes-suite-channel` name, because suite-cli keys on them.
 
 Status: transport, Hermes platform adapter, installer (task 01a0d6c5 stages
 1-4).
@@ -173,7 +176,7 @@ that step cut out and requires the sha comparison to fail.
 curl -fsSL <raw url>/update.sh | bash -s -- [--ref SHA]
 ```
 
-Like `openclaw-suite-channel`'s update.sh: it refreshes the plugin files and
+Like `burrow-channel-openclaw`'s update.sh: it refreshes the plugin files and
 preserves the configuration. `.env` and the MCP entry are not touched and the
 token is not read. It runs `install.sh --plugin-only`, which reinstalls with
 `--force --ref <sha>` and restamps `_build.py`. Restart the gateway afterwards.
@@ -261,7 +264,7 @@ the allowlist (`*_ALLOWED_USERS`), allow-all (`*_ALLOW_ALL_USERS`) and the cron
 home channel (`*_HOME_CHANNEL`, and Hermes's own `<that name>_NAME`). Measured
 at hermes-agent fdec926e (`gateway/authz_mixin.py` `_principal_authorized`):
 registering `BURROW_ALLOWED_USERS` on a host that sets only
-`SUITE_ALLOWED_USERS=Ryan` denies Ryan as well as everyone else, and
+`SUITE_ALLOWED_USERS=alice` denies alice as well as everyone else, and
 `SUITE_ALLOW_ALL_USERS=true` stops admitting anyone. So `register()` passes the
 spelling the host sets (`BURROW_` when set, else `SUITE_`, else `BURROW_`).
 Two consequences:
@@ -559,6 +562,6 @@ plugins. hermes-agent only pins `websockets` itself for Python >= 3.14.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The text is copied from `openclaw-suite-channel`.
-`claude-code-suite-channel` ships no LICENSE file (its `package.json` declares
+MIT, see [LICENSE](LICENSE). The text is copied from `burrow-channel-openclaw`.
+`burrow-channel-claude-code` ships no LICENSE file (its `package.json` declares
 MIT), so the openclaw copy is the only license text there is to match.
