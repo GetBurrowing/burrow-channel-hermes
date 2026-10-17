@@ -76,8 +76,9 @@ Two install details that were measured, not assumed (hermes-agent fdec926e):
 - **Private repository.** `hermes plugins install` accepts `file://` sources
   (with a warning) and `--ref <40-char sha>`. Run from a checkout, install.sh
   installs `file://<checkout>` at its HEAD. Without a checkout it clones
-  `--repo` (default `https://github.com/Startup-Suite/hermes-suite-channel.git`)
-  with your own git credentials, asks Hermes to install the https URL (Hermes
+  `--repo URL`, else `$HERMES_SUITE_CHANNEL_REPO`, else this repository's
+  GitHub URL, with your own git credentials (update.sh resolves the same way
+  and passes the result on), asks Hermes to install the https URL (Hermes
   tries `GITHUB_TOKEN`/`GH_TOKEN` from `.env`, then `gh auth`, then the git
   credential helper), and retries from the local clone. `--copy-fallback`
   copies the committed tree into `$HERMES_HOME/plugins/` when Hermes refuses
