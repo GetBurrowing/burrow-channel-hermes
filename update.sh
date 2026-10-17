@@ -14,7 +14,9 @@
 set -euo pipefail
 
 readonly PLUGIN_NAME="startup-suite-platform"
-readonly DEFAULT_REPO="https://github.com/Startup-Suite/hermes-suite-channel.git"
+# Clone source when not run from a checkout. Precedence: --repo, then the
+# HERMES_SUITE_CHANNEL_REPO environment variable, then this default.
+readonly DEFAULT_REPO="${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}"
 readonly RESULT_LINE="hermes-suite-channel: updated"
 
 log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
@@ -32,9 +34,10 @@ while [ "$#" -gt 0 ]; do
     --token | --token=*) die "--token is refused, and update.sh does not need the token" ;;
     --hermes-home) [ -n "${2:-}" ] || die "--hermes-home needs a value"; HERMES_HOME_ARG="$2"; shift 2 ;;
     --hermes-home=*) HERMES_HOME_ARG="${1#*=}"; shift ;;
-    --repo) [ -n "${2:-}" ] || die "--repo needs a value"; REPO_URL="$2"; PASS+=(--repo "$2"); shift 2 ;;
+    --repo) [ -n "${2:-}" ] || die "--repo needs a value"; REPO_URL="$2"; shift 2 ;;
     --hermes | --ref) [ -n "${2:-}" ] || die "$1 needs a value"; PASS+=("$1" "$2"); shift 2 ;;
-    --hermes=* | --ref=* | --repo=*) PASS+=("$1"); [[ "$1" != --repo=* ]] || REPO_URL="${1#*=}"; shift ;;
+    --repo=*) REPO_URL="${1#*=}"; shift ;;
+    --hermes=* | --ref=*) PASS+=("$1"); shift ;;
     --copy-fallback | --refuse-scan-caution) PASS+=("$1"); shift ;;
     -h | --help)
       echo "usage: update.sh [--hermes-home DIR] [--hermes BIN] [--ref SHA] [--repo URL] [--copy-fallback] [--refuse-scan-caution]" >&2
@@ -43,6 +46,10 @@ while [ "$#" -gt 0 ]; do
     *) die "unknown argument: $1" ;;
   esac
 done
+
+# Hand install.sh the resolved repository (flag, else env, else default) so
+# both scripts clone the same source.
+PASS+=(--repo "$REPO_URL")
 
 HERMES_HOME="${HERMES_HOME_ARG:-${HERMES_HOME:-$HOME/.hermes}}"
 export HERMES_HOME

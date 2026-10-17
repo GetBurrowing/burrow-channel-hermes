@@ -43,7 +43,9 @@ readonly PLUGIN_NAME="startup-suite-platform"
 readonly MCP_NAME="startup-suite"
 readonly TOKEN_RELPATH="mcp-tokens/startup-suite-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
-readonly DEFAULT_REPO="https://github.com/Startup-Suite/hermes-suite-channel.git"
+# Clone source when not run from a checkout. Precedence: --repo, then the
+# HERMES_SUITE_CHANNEL_REPO environment variable, then this default.
+readonly DEFAULT_REPO="${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}"
 readonly RESULT_LINE="hermes-suite-channel: installed"
 
 log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
@@ -494,7 +496,7 @@ resolve_source() {
   SRC_DIR="$CLEANUP_DIR/src"
   log "cloning $REPO_URL"
   git clone --quiet "$REPO_URL" "$SRC_DIR" ||
-    die "could not clone $REPO_URL (private repository: authenticate git, e.g. gh auth setup-git, or pass --repo git@github.com:Startup-Suite/hermes-suite-channel.git)"
+    die "could not clone $REPO_URL (private repository: authenticate git, e.g. gh auth setup-git, or pass the ssh form of $REPO_URL with --repo URL or HERMES_SUITE_CHANNEL_REPO=URL)"
   if [ -n "$REF_ARG" ]; then
     git -C "$SRC_DIR" checkout --quiet --detach "$REF_ARG" || die "no such commit: $REF_ARG"
   fi

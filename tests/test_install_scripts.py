@@ -359,6 +359,101 @@ def test_piped_script_does_not_read_the_token_from_stdin(checkout, home, env, to
     assert token_path(home).read_text() == token + "\n"
 
 
+# ------------------------------------------------- install source repository
+
+DEFAULT_REPO_URL = "https://github.com/Startup-Suite/hermes-suite-channel.git"
+
+
+def _piped(script_path: Path, args: list[str], env: dict, stdin_extra: str = ""):
+    """`curl ... | bash -s -- ...`: no checkout beside the script, so the
+    script clones its source repository."""
+    return subprocess.run(
+        ["bash", "-s", "--", *args],
+        input=script_path.read_text(),
+        capture_output=True,
+        text=True,
+        env=env,
+        start_new_session=True,
+        timeout=120,
+    )
+
+
+def _piped_install(checkout, home, env, tmp_path, token, *extra):
+    tf = tmp_path / "tok"
+    tf.write_text(token)
+    args = ["--url", "wss://h.test/runtime/ws", "--runtime-id", "rt"]
+    args += ["--hermes-home", str(home), "--token-file", str(tf), *extra]
+    return _piped(checkout / "install.sh", args, env)
+
+
+def test_repo_env_var_reaches_the_clone(checkout, home, env, token, tmp_path):
+    proc = _piped_install(
+        checkout, home, {**env, "HERMES_SUITE_CHANNEL_REPO": str(checkout)}, tmp_path, token
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"cloning {checkout}\n" in proc.stderr
+    assert DEFAULT_REPO_URL not in proc.stderr
+    head = _git(checkout, "rev-parse", "HEAD")
+    plugin = home / "plugins" / "startup-suite-platform"
+    assert f'BUILD = "{head}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
+
+
+@pytest.mark.parametrize("form", ["--repo", "--repo="])
+def test_repo_flag_beats_the_env_var(checkout, home, env, token, tmp_path, form):
+    bogus = tmp_path / "no-such-repo"
+    flag = [f"--repo={checkout}"] if form == "--repo=" else ["--repo", str(checkout)]
+    proc = _piped_install(
+        checkout, home, {**env, "HERMES_SUITE_CHANNEL_REPO": str(bogus)}, tmp_path, token, *flag
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"cloning {checkout}\n" in proc.stderr
+    assert str(bogus) not in proc.stderr
+
+
+def test_repo_default_is_unchanged_without_flag_or_env(checkout, home, env, token, tmp_path):
+    env = {k: v for k, v in env.items() if k != "HERMES_SUITE_CHANNEL_REPO"}
+    # Never touch the network: refuse every transport but file://.
+    env["GIT_ALLOW_PROTOCOL"] = "file"
+    proc = _piped_install(checkout, home, env, tmp_path, token)
+    assert f"cloning {DEFAULT_REPO_URL}\n" in proc.stderr
+    assert proc.returncode != 0
+    assert f"could not clone {DEFAULT_REPO_URL}" in proc.stderr
+    assert "Startup-Suite" not in proc.stderr.split("could not clone", 1)[1].replace(
+        DEFAULT_REPO_URL, ""
+    )
+
+
+def test_update_resolves_the_env_var_and_passes_it_on(checkout, home, env, token, tmp_path):
+    assert install(checkout, home, env, token).returncode == 0
+    (checkout / "NEWFILE").write_text("x\n")
+    _git(checkout, "add", "NEWFILE")
+    _git(checkout, "commit", "-q", "-m", "next")
+    new_sha = _git(checkout, "rev-parse", "HEAD")
+
+    proc = _piped(
+        checkout / "update.sh",
+        ["--hermes-home", str(home)],
+        {**env, "HERMES_SUITE_CHANNEL_REPO": str(checkout)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == UPDATED
+    plugin = home / "plugins" / "startup-suite-platform"
+    assert f'BUILD = "{new_sha}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
+
+
+def test_update_repo_flag_beats_the_env_var(checkout, home, env, token, tmp_path):
+    assert install(checkout, home, env, token).returncode == 0
+    bogus = tmp_path / "no-such-repo"
+    proc = _piped(
+        checkout / "update.sh",
+        ["--hermes-home", str(home), "--repo", str(checkout)],
+        {**env, "HERMES_SUITE_CHANNEL_REPO": str(bogus)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert last_line(proc) == UPDATED
+    assert str(bogus) not in proc.stderr
+
+
 def test_empty_token_is_refused(checkout, home, env):
     proc = install(checkout, home, env, "")
     assert proc.returncode != 0 and "empty" in proc.stderr
