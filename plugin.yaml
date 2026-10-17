@@ -1,7 +1,7 @@
 name: startup-suite-platform
 label: Startup Suite
 kind: platform
-version: 0.1.0
+version: 0.2.0
 description: >
   Startup Suite federation adapter for Hermes Agent. Joins the Suite runtime
   socket as a federated runtime, delivers Suite attention events (mentions,
