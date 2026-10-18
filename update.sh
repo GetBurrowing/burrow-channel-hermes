@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Update an installed Startup Suite channel plugin to this checkout's HEAD
+# Update an installed Burrow channel plugin to this checkout's HEAD
 # (or, outside a checkout, to --ref / the default branch of --repo).
 #
-# Mirrors openclaw-suite-channel's update.sh: it refreshes the plugin files
+# Mirrors burrow-channel-openclaw's update.sh: it refreshes the plugin files
 # only and preserves the configuration. .env (URL, runtime id, token) and the
 # MCP entry are left untouched; the token is not needed and not read.
 #
@@ -15,8 +15,9 @@ set -euo pipefail
 
 readonly PLUGIN_NAME="startup-suite-platform"
 # Clone source when not run from a checkout. Precedence: --repo, then the
-# HERMES_SUITE_CHANNEL_REPO environment variable, then this default.
-readonly DEFAULT_REPO="${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/hermes-suite-channel.git}"
+# HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
+# HERMES_SUITE_CHANNEL_REPO, then this default.
+readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/burrow-channel-hermes.git}}"
 readonly RESULT_LINE="hermes-suite-channel: updated"
 
 log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
@@ -24,6 +25,14 @@ die() {
   printf 'hermes-suite-channel: error: %s\n' "$*" >&2
   exit 1
 }
+
+# One stderr line when only the deprecated repo override is set.
+warn_deprecated_repo_env() {
+  if [ -z "${HERMES_BURROW_CHANNEL_REPO:-}" ] && [ -n "${HERMES_SUITE_CHANNEL_REPO:-}" ]; then
+    log "HERMES_SUITE_CHANNEL_REPO is deprecated; set HERMES_BURROW_CHANNEL_REPO (the old name still works)"
+  fi
+}
+warn_deprecated_repo_env
 
 HERMES_HOME_ARG=""
 REPO_URL="$DEFAULT_REPO"
@@ -76,7 +85,10 @@ else
 fi
 
 BEFORE="$(sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$PLUGIN_DIR/hermes_suite_channel/_build.py" 2>/dev/null || true)"
-bash "$INSTALLER" --plugin-only --hermes-home "$HERMES_HOME" ${PASS[@]+"${PASS[@]}"} </dev/null
+# The repository is already resolved into --repo, so the child does not need
+# the old override, and without it does not print the deprecation line twice.
+env -u HERMES_SUITE_CHANNEL_REPO \
+  bash "$INSTALLER" --plugin-only --hermes-home "$HERMES_HOME" ${PASS[@]+"${PASS[@]}"} </dev/null
 AFTER="$(sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$PLUGIN_DIR/hermes_suite_channel/_build.py")"
 
 if [ "$BEFORE" = "$AFTER" ]; then

@@ -1,4 +1,4 @@
-"""Phoenix runtime-socket client for Startup Suite federation (asyncio).
+"""Phoenix runtime-socket client for Burrow federation (asyncio).
 
 A port of claude-code-suite-channel ``src/suite-client.ts`` to Python, using
 the ``websockets`` library directly instead of the phoenix JS client.
@@ -180,7 +180,7 @@ class AttachmentTooLarge(SuiteError):
 
 
 class InvalidSuiteURL(SuiteError):
-    """SUITE_URL cannot be dialled as a websocket URI. Terminal: retrying the
+    """BURROW_URL (or SUITE_URL) cannot be dialled as a websocket URI. Terminal: retrying the
     same URL cannot succeed, so the supervisor stops instead of looping."""
 
 
@@ -354,7 +354,7 @@ class SuiteClient:
             problem = "could not be parsed"
         if problem is not None:
             raise InvalidSuiteURL(
-                f"SUITE_URL {problem} (value withheld: the dial URL carries the token)"
+                f"BURROW_URL/SUITE_URL {problem} (value withheld: the dial URL carries the token)"
             )
         return await connect(
             url,

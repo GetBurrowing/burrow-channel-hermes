@@ -10,7 +10,7 @@
 # Each of those can turn this job green while running nothing, which is the
 # exact failure mode the tests below exist to catch.
 #
-# Mirrors claude-code-suite-channel/.github/workflows/ci.yml. The self-hosted
+# Mirrors burrow-channel-claude-code/.github/workflows/ci.yml. The self-hosted
 # runner has no setup-python support (bootc host), so this uses the host
 # python3 and a job-local venv.
 

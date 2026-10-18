@@ -23,6 +23,7 @@ except ImportError as exc:  # pragma: no cover - a message, not a skip
     ) from exc
 
 from hermes_suite_channel import adapter as adapter_mod
+from hermes_suite_channel import config as config_mod
 from hermes_suite_channel.adapter import (
     NO_SPACE_CHAT,
     PLATFORM_NAME,
@@ -52,15 +53,17 @@ class FakeCtx:
 @pytest.fixture(autouse=True)
 def hermes_env(monkeypatch, tmp_path):
     # Each test starts with no token held from an earlier test's register().
-    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
-    monkeypatch.delenv("SUITE_RUNTIME_TOKEN_FILE", raising=False)
+    # The deprecation warnings are once per process; each test starts fresh.
+    monkeypatch.setattr(config_mod, "_WARNED", set())
+    for key in list(__import__("os").environ):
+        if key.startswith(("SUITE_", "BURROW_")):
+            monkeypatch.delenv(key)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     monkeypatch.setenv("HERMES_GATEWAY_LOCK_DIR", str(tmp_path / "locks"))
+    # An old (v0.2.0) host: SUITE_ names only. Every test below that does not
+    # say otherwise runs the deprecated-name path.
     monkeypatch.setenv("SUITE_RUNTIME_ID", "rt-01a0d6c5")
     monkeypatch.setenv("SUITE_RUNTIME_TOKEN", TOKEN)
-    for key in list(__import__("os").environ):
-        if key.startswith("SUITE_") and key.endswith("_MS"):
-            monkeypatch.delenv(key)
     ctx = FakeCtx()
     register(ctx)
     return ctx
@@ -111,13 +114,16 @@ async def settle():
 def test_register_uses_real_platform_entry_kwargs(hermes_env):
     kw = hermes_env.kwargs
     assert kw["name"] == "startup_suite"
-    assert kw["required_env"] == ["SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN_FILE"]
-    assert kw["allowed_users_env"] == "SUITE_ALLOWED_USERS"
-    assert kw["allow_all_env"] == "SUITE_ALLOW_ALL_USERS"
+    # The spelling the host sets; the new name where it sets neither.
+    assert kw["required_env"] == ["BURROW_URL", "SUITE_RUNTIME_ID", "BURROW_RUNTIME_TOKEN_FILE"]
+    assert kw["allowed_users_env"] == "BURROW_ALLOWED_USERS"
+    assert kw["allow_all_env"] == "BURROW_ALLOW_ALL_USERS"
+    assert kw["cron_deliver_env_var"] == "BURROW_HOME_CHANNEL"
+    assert kw["label"] == "Burrow"
     for fn in ("check_fn", "validate_config", "is_connected", "env_enablement_fn"):
         assert callable(kw[fn])
     hint = kw["platform_hint"]
-    assert "Startup Suite space" in hint and "markdown" in hint
+    assert "Burrow space" in hint and "markdown" in hint
     assert "mention" in hint and "add that agent to the space" in hint
     assert AT + "[" not in hint
 
@@ -528,3 +534,251 @@ async def test_malformed_suite_url_fails_connect_without_the_token(monkeypatch, 
     assert TOKEN not in adapter._fatal_error_message
     assert "SUITE_URL" in adapter._fatal_error_message
     assert all(TOKEN not in r.getMessage() for r in caplog.records)
+
+
+# ── BURROW_* first, SUITE_* fallback: the names Hermes reads itself ───────
+#
+# Hermes takes ONE env name each for the allowlist, the allow-all switch and
+# the cron home channel, and reads it live on every message
+# (gateway/authz_mixin.py _principal_authorized, cron/scheduler_delivery.py).
+# Measured at fdec926e: registering BURROW_ALLOWED_USERS on a host that sets
+# only SUITE_ALLOWED_USERS=Ryan denies Ryan AND everyone else (the allowlist is
+# read as empty, then default-deny), and SUITE_ALLOW_ALL_USERS=true stops
+# admitting anyone. register() therefore passes the spelling the host sets.
+
+
+def _authorized(user_id: str) -> bool:
+    """The REAL gateway authorization verdict for a Burrow DM from user_id,
+    against whatever startup_suite entry is registered now."""
+    from gateway.authz_mixin import GatewayAuthorizationMixin
+    from gateway.config import Platform
+    from gateway.session import SessionSource
+
+    gate = object.__new__(GatewayAuthorizationMixin)
+    gate.pairing_store = None
+    source = SessionSource(
+        platform=Platform(PLATFORM_NAME),
+        chat_id="sp-1",
+        chat_type="dm",
+        user_id=user_id,
+        user_name=user_id,
+        is_bot=False,
+    )
+    return gate._is_user_authorized(source)
+
+
+def _register_with(monkeypatch, **env) -> dict:
+    for key in ("GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    ctx = FakeCtx()
+    register(ctx)
+    return ctx.kwargs
+
+
+def test_suite_allowed_users_only_still_gates_against_the_real_gateway(monkeypatch):
+    kw = _register_with(monkeypatch, SUITE_ALLOWED_USERS="Ryan")
+    assert kw["allowed_users_env"] == "SUITE_ALLOWED_USERS"
+    assert _authorized("Ryan") is True  # listed: admitted (the naive rename denies this)
+    assert _authorized("Mallory") is False  # not listed: denied
+
+
+def test_burrow_allowed_users_only_gates(monkeypatch):
+    kw = _register_with(monkeypatch, BURROW_ALLOWED_USERS="Ryan")
+    assert kw["allowed_users_env"] == "BURROW_ALLOWED_USERS"
+    assert _authorized("Ryan") is True
+    assert _authorized("Mallory") is False
+
+
+def test_burrow_allowed_users_wins_over_suite(monkeypatch):
+    _register_with(monkeypatch, BURROW_ALLOWED_USERS="Ryan", SUITE_ALLOWED_USERS="Mallory")
+    assert _authorized("Ryan") is True
+    assert _authorized("Mallory") is False
+
+
+def test_no_allowlist_at_all_denies(monkeypatch):
+    kw = _register_with(monkeypatch)
+    assert kw["allowed_users_env"] == "BURROW_ALLOWED_USERS"
+    assert _authorized("Ryan") is False
+
+
+def test_suite_allow_all_users_only_still_admits(monkeypatch):
+    kw = _register_with(monkeypatch, SUITE_ALLOW_ALL_USERS="true")
+    assert kw["allow_all_env"] == "SUITE_ALLOW_ALL_USERS"
+    assert _authorized("Mallory") is True
+
+
+def test_burrow_allow_all_users_wins_over_suite(monkeypatch):
+    kw = _register_with(monkeypatch, BURROW_ALLOW_ALL_USERS="false", SUITE_ALLOW_ALL_USERS="true")
+    assert kw["allow_all_env"] == "BURROW_ALLOW_ALL_USERS"
+    assert _authorized("Mallory") is False
+
+
+def test_the_naive_rename_would_lock_out_a_suite_only_host(monkeypatch):
+    """Positive control for the gate tests: the trap is real at fdec926e. A
+    registry entry naming BURROW_ALLOWED_USERS on a SUITE_-only host denies
+    the listed user, so a passing test above discriminates the two designs."""
+    _register_with(monkeypatch, SUITE_ALLOWED_USERS="Ryan")
+    entry = platform_registry.get(PLATFORM_NAME)
+    entry.allowed_users_env = "BURROW_ALLOWED_USERS"
+    try:
+        assert _authorized("Ryan") is False
+    finally:
+        entry.allowed_users_env = "SUITE_ALLOWED_USERS"
+
+
+def test_home_channel_name_follows_the_spelling_set(monkeypatch):
+    kw = _register_with(monkeypatch, SUITE_HOME_CHANNEL="sp-home")
+    assert kw["cron_deliver_env_var"] == "SUITE_HOME_CHANNEL"
+    kw = _register_with(monkeypatch, BURROW_HOME_CHANNEL="sp-new")
+    assert kw["cron_deliver_env_var"] == "BURROW_HOME_CHANNEL"
+
+
+def test_required_env_declares_every_spelling_the_host_sets(monkeypatch):
+    """A `hermes profile create --clone` strips the names an adapter declares,
+    one by one (hermes_cli/profile_channels.py). install.sh writes both
+    spellings, so both are declared, or a clone keeps SUITE_URL and dials the
+    source's runtime."""
+    kw = _register_with(
+        monkeypatch,
+        BURROW_URL="wss://b.example/runtime/ws",
+        SUITE_URL="wss://b.example/runtime/ws",
+        BURROW_RUNTIME_ID="rt-01a0d6c5",
+        BURROW_RUNTIME_TOKEN_FILE="/x",
+        SUITE_RUNTIME_TOKEN_FILE="/x",
+    )
+    assert kw["required_env"] == [
+        "BURROW_URL",
+        "SUITE_URL",
+        "BURROW_RUNTIME_ID",
+        "SUITE_RUNTIME_ID",
+        "BURROW_RUNTIME_TOKEN_FILE",
+        "SUITE_RUNTIME_TOKEN_FILE",
+    ]
+
+
+def test_a_profile_clone_strips_both_spellings(monkeypatch, tmp_path):
+    """Hermes's own clone stripper, against the entry register() made."""
+    from hermes_cli.profile_channels import ChannelKeyIndex, strip_channel_env_file
+
+    both = {
+        "BURROW_URL": "wss://b.example/runtime/ws",
+        "SUITE_URL": "wss://b.example/runtime/ws",
+        "BURROW_RUNTIME_ID": "rt-1",
+        "SUITE_RUNTIME_ID": "rt-1",
+        "BURROW_RUNTIME_TOKEN_FILE": "/x",
+        "SUITE_RUNTIME_TOKEN_FILE": "/x",
+    }
+    _register_with(monkeypatch, **both)
+    dotenv = tmp_path / "clone.env"
+    dotenv.write_text("OPENAI_API_KEY=k\n" + "".join(f"{k}={v}\n" for k, v in both.items()))
+    removed = strip_channel_env_file(dotenv, ChannelKeyIndex())
+    assert sorted(removed.get(PLATFORM_NAME, [])) == sorted(both)
+    assert dotenv.read_text() == "OPENAI_API_KEY=k\n"
+
+
+def test_env_enablement_reads_burrow_first_then_suite(monkeypatch):
+    monkeypatch.setenv("SUITE_URL", "wss://old.example/runtime/ws")
+    monkeypatch.setenv("SUITE_RECONNECT_MIN_MS", "1000")
+    monkeypatch.setenv("SUITE_HOME_CHANNEL", "sp-old")
+    seed = adapter_mod._env_enablement()
+    assert seed["url"] == "wss://old.example/runtime/ws"
+    assert seed["reconnect_min_ms"] == 1000
+    assert seed["home_channel"]["chat_id"] == "sp-old"
+
+    monkeypatch.setenv("BURROW_URL", "wss://new.example/runtime/ws")
+    monkeypatch.setenv("BURROW_RUNTIME_ID", "rt-new")
+    monkeypatch.setenv("BURROW_RECONNECT_MIN_MS", "4000")
+    monkeypatch.setenv("BURROW_HOME_CHANNEL", "sp-new")
+    seed = adapter_mod._env_enablement()
+    assert seed["url"] == "wss://new.example/runtime/ws"
+    assert seed["runtime_id"] == "rt-new"
+    assert seed["reconnect_min_ms"] == 4000
+    assert seed["home_channel"]["chat_id"] == "sp-new"
+
+
+def test_env_enablement_needs_a_url_under_either_name(monkeypatch):
+    assert adapter_mod._env_enablement() is None  # runtime id only
+    monkeypatch.setenv("BURROW_URL", "wss://new.example/runtime/ws")
+    assert adapter_mod._env_enablement()["runtime_id"] == "rt-01a0d6c5"
+
+
+def test_burrow_env_token_wins_and_both_leave_os_environ(monkeypatch):
+    import os
+
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    monkeypatch.setenv("SUITE_RUNTIME_TOKEN", "tok-old-01a14b9f")
+    monkeypatch.setenv("BURROW_RUNTIME_TOKEN", "tok-new-01a14b9f")
+    assert adapter_mod._take_env_token() == "tok-new-01a14b9f"
+    assert "SUITE_RUNTIME_TOKEN" not in os.environ
+    assert "BURROW_RUNTIME_TOKEN" not in os.environ
+
+
+def test_burrow_token_file_wins(monkeypatch, tmp_path):
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    old = _token_file(tmp_path / "old", "tok-oldfile-01a14b9f")
+    new = _token_file(tmp_path / "new", "tok-newfile-01a14b9f")
+    monkeypatch.setenv("SUITE_RUNTIME_TOKEN_FILE", str(old))
+    monkeypatch.setenv("BURROW_RUNTIME_TOKEN_FILE", str(new))
+    adapter = make_adapter("wss://suite.example/runtime/ws")
+    assert adapter.suite_config.token == "tok-newfile-01a14b9f"
+
+
+def test_agent_id_reads_burrow_first(monkeypatch):
+    monkeypatch.setenv("SUITE_AGENT_ID", "agent-old")
+    assert make_adapter("wss://suite.example/runtime/ws")._self_ids == {"agent-old"}
+    monkeypatch.setenv("BURROW_AGENT_ID", "agent-new")
+    assert make_adapter("wss://suite.example/runtime/ws")._self_ids == {"agent-new"}
+
+
+async def test_both_set_differently_dials_and_joins_the_burrow_values(server, monkeypatch):
+    """BURROW_URL / BURROW_RUNTIME_ID / BURROW_RUNTIME_TOKEN win end to end:
+    the socket the client opens and the topic it joins."""
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    monkeypatch.setenv("SUITE_URL", "ws://127.0.0.1:9/runtime/ws")  # nothing listens
+    monkeypatch.setenv("BURROW_URL", server.url)
+    monkeypatch.setenv("SUITE_RUNTIME_ID", "rt-A")
+    monkeypatch.setenv("BURROW_RUNTIME_ID", "rt-B")
+    monkeypatch.setenv("SUITE_RUNTIME_TOKEN", "tok-A-01a14b9f")
+    monkeypatch.setenv("BURROW_RUNTIME_TOKEN", "tok-B-01a14b9f")
+    adapter = SuiteAdapter(PlatformConfig(enabled=True, extra={**FAST}))
+    assert await adapter.connect() is True
+    try:
+        assert server.topic == "runtime:rt-B"
+        assert any("token=tok-B-01a14b9f" in p for p in server.request_paths)
+        assert not any("tok-A-01a14b9f" in p for p in server.request_paths)
+    finally:
+        await adapter.disconnect()
+
+
+async def test_suite_only_host_connects_and_warns_once_per_name(server, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    monkeypatch.setenv("SUITE_URL", server.url)
+    for _ in range(3):
+        adapter = SuiteAdapter(PlatformConfig(enabled=True, extra={**FAST}))
+        assert await adapter.connect() is True
+        await adapter.disconnect()
+        adapter_mod.check_requirements()
+    # register() in the autouse fixture (plugin load) is part of the same process.
+    records = caplog.get_records("setup") + caplog.records
+    lines = [r.getMessage() for r in records if "is deprecated" in r.getMessage()]
+    for name in ("SUITE_URL", "SUITE_RUNTIME_ID", "SUITE_RUNTIME_TOKEN"):
+        assert sum(line.startswith(f"Burrow: {name} is deprecated") for line in lines) == 1, lines
+    assert len(lines) == 3, lines
+    assert all(TOKEN not in r.getMessage() for r in records)
+
+
+async def test_burrow_only_host_connects_without_a_warning(server, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
+    monkeypatch.delenv("SUITE_RUNTIME_ID")
+    monkeypatch.setenv("BURROW_URL", server.url)
+    monkeypatch.setenv("BURROW_RUNTIME_ID", "rt-01a0d6c5")
+    monkeypatch.setenv("BURROW_RUNTIME_TOKEN", TOKEN)
+    ctx = FakeCtx()
+    register(ctx)
+    adapter = SuiteAdapter(PlatformConfig(enabled=True, extra={**FAST}))
+    assert await adapter.connect() is True
+    await adapter.disconnect()
+    assert not [r for r in caplog.records if "is deprecated" in r.getMessage()]

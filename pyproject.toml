@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-suite-channel"
-version = "0.2.0"
-description = "Hermes Agent platform plugin for Startup Suite federation"
+version = "0.3.0"
+description = "Hermes Agent platform plugin for Burrow federation"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
