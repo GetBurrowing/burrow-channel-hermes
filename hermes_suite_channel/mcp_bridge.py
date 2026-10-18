@@ -1,4 +1,4 @@
-"""stdio MCP server that relays to Suite's HTTP MCP endpoint, reading the
+"""stdio MCP server that relays to Burrow's HTTP MCP endpoint, reading the
 bearer token from a file.
 
 Why it exists: Hermes resolves an HTTP MCP server's ``headers`` only through
@@ -16,7 +16,7 @@ Wire protocol: one JSON-RPC message per line on stdin, one per line on stdout
 (MCP stdio). Each message is POSTed to ``--url`` (MCP Streamable HTTP): a JSON
 body is relayed as is, a ``text/event-stream`` body is relayed event by event,
 202/204 relays nothing. ``Mcp-Session-Id`` and ``MCP-Protocol-Version`` are
-carried forward as the transport requires. Suite's endpoint answers JSON,
+carried forward as the transport requires. Burrow's endpoint answers JSON,
 keeps no session and refuses the optional GET stream (405,
 platform_web/controllers/mcp_controller.ex), so server-initiated messages are
 not relayed.
@@ -127,12 +127,12 @@ class Bridge:
                 session = response.headers.get("Mcp-Session-Id")
                 raw = response.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
-            raise BridgeError(f"Suite MCP answered HTTP {exc.code}") from None
+            raise BridgeError(f"Burrow MCP answered HTTP {exc.code}") from None
         except urllib.error.URLError as exc:
             reason = type(getattr(exc, "reason", exc)).__name__
-            raise BridgeError(f"Suite MCP unreachable ({reason})") from None
+            raise BridgeError(f"Burrow MCP unreachable ({reason})") from None
         except (TimeoutError, OSError) as exc:
-            raise BridgeError(f"Suite MCP request failed ({type(exc).__name__})") from None
+            raise BridgeError(f"Burrow MCP request failed ({type(exc).__name__})") from None
         if session:
             with self._state:
                 self.session_id = session
@@ -144,7 +144,7 @@ class Bridge:
             try:
                 parsed = json.loads(raw)
             except ValueError:
-                raise BridgeError("Suite MCP answered a body that is not JSON") from None
+                raise BridgeError("Burrow MCP answered a body that is not JSON") from None
             replies = parsed if isinstance(parsed, list) else [parsed]
         self._note_protocol(message, replies)
         return replies
@@ -199,7 +199,7 @@ class Bridge:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
-    parser.add_argument("--url", required=True, help="Suite MCP endpoint, e.g. https://host/mcp")
+    parser.add_argument("--url", required=True, help="Burrow MCP endpoint, e.g. https://host/mcp")
     parser.add_argument("--token-file", required=True, help="file holding the runtime token")
     parser.add_argument("--timeout", type=float, default=300.0, help="per-request timeout, s")
     args = parser.parse_args(argv)
