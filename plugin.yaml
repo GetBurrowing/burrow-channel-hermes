@@ -1,7 +1,7 @@
 name: startup-suite-platform
 label: Burrow
 kind: platform
-version: 0.3.0
+version: 0.3.1
 description: >
   Burrow federation adapter for Hermes Agent. Joins the Burrow runtime
   socket as a federated runtime, delivers Burrow attention events (mentions,

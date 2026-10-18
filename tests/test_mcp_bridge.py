@@ -1,5 +1,5 @@
 """hermes_suite_channel/mcp_bridge.py as Hermes runs it: a subprocess speaking
-MCP stdio, relaying to an HTTP endpoint shaped like Suite's
+MCP stdio, relaying to an HTTP endpoint shaped like Burrow's
 (platform_web/controllers/mcp_controller.ex: JSON replies, 204 for a
 notification, no session)."""
 

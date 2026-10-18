@@ -393,7 +393,7 @@ fewer people, never more.
 A trusted message arrives as:
 
 ```
-[Suite message from your owner <name> (verified user id <uuid>) in space <space_id>]
+[Burrow message from your owner <name> (verified user id <uuid>) in space <space_id>]
 <body>
 ```
 

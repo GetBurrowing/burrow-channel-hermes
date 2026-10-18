@@ -149,7 +149,7 @@ TOKEN_FILE_RELPATH = Path("mcp-tokens") / "startup-suite-platform.runtime-token"
 _ENV_ONLY = frozenset({"token"})
 
 
-# Suite user ids whose messages are delivered as owner instructions rather than
+# Burrow user ids whose messages are delivered as owner instructions rather than
 # inside the untrusted envelope. Env first, then ``extra["trusted_user_ids"]``
 # (a comma string or a list). Empty, the default, trusts nobody. Only canonical
 # UUIDs are kept: an entry of any other shape (a display name, a typo) is

@@ -100,7 +100,7 @@ def socket_url(config: SuiteConfig) -> str:
 def attention_identity(payload: dict[str, Any]) -> str:
     """Dedupe identity, mirroring ``attentionIdentity()`` in the sibling.
 
-    Every component can only make the key more unique. A byte-identical Suite
+    Every component can only make the key more unique. A byte-identical Burrow
     retry still collapses; a responsibility dispatch (no space_id, no
     message_id) is told apart by its responsibility key and correlation ids.
     """
@@ -155,7 +155,7 @@ class NotConnected(SuiteError):
 
 
 class PushRefused(SuiteError):
-    """Suite answered the push with an error reply."""
+    """Burrow answered the push with an error reply."""
 
     def __init__(self, message: str, *, recoverable: bool, response: dict[str, Any]):
         super().__init__(message, recoverable=recoverable)
@@ -372,7 +372,7 @@ class SuiteClient:
         for fut in pending.values():
             if not fut.done():
                 fut.set_exception(
-                    ConnectionLost("the Suite socket closed before the push was acked")
+                    ConnectionLost("the Burrow socket closed before the push was acked")
                 )
 
     async def _join(self, ws: Any, reader: asyncio.Task) -> None:
@@ -539,13 +539,13 @@ class SuiteClient:
         """Push on the runtime channel and await the ack.
 
         Returns the ``response`` of an ok reply. Raises ``NotConnected``,
-        ``PushRefused`` (carrying Suite's ``recoverable``), ``PushTimeout`` or
+        ``PushRefused`` (carrying Burrow's ``recoverable``), ``PushTimeout`` or
         ``ConnectionLost``.
         """
         ws = self._ws
         if ws is None or not self.joined:
             raise NotConnected(
-                f"not connected to Suite: the runtime channel is not joined, "
+                f"not connected to Burrow: the runtime channel is not joined, "
                 f"so the {event} to space {space_id} was not delivered"
             )
         ref = self._next_ref()
@@ -558,14 +558,14 @@ class SuiteClient:
         except TimeoutError:
             self._log.warning("%s to space %s: no ack after %dms", event, space_id, timeout_ms)
             raise PushTimeout(
-                f"timed out after {timeout_ms}ms waiting for Suite to ack the {event} "
+                f"timed out after {timeout_ms}ms waiting for Burrow to ack the {event} "
                 f"to space {space_id}"
             ) from None
         except SuiteError:
             raise
         except Exception as exc:  # the socket died under the send
             raise ConnectionLost(
-                f"the Suite socket failed while sending the {event} to space {space_id} "
+                f"the Burrow socket failed while sending the {event} to space {space_id} "
                 f"({type(exc).__name__})"
             ) from None
         finally:
@@ -579,7 +579,7 @@ class SuiteClient:
         raise PushRefused(
             error
             if isinstance(error, str)
-            else f"{event} to space {space_id} was refused by Suite",
+            else f"{event} to space {space_id} was refused by Burrow",
             recoverable=response.get("recoverable") is True,
             response=response,
         )
@@ -608,13 +608,13 @@ class SuiteClient:
                 data = base64.b64encode(data).decode("ascii")
             if len(data) > MAX_ATTACHMENT_BYTES * 4 // 3:
                 raise AttachmentTooLarge(
-                    f"attachment {att['filename']!r} exceeds Suite's 10 MiB per-file cap"
+                    f"attachment {att['filename']!r} exceeds Burrow's 10 MiB per-file cap"
                 )
             encoded.append(
                 {"filename": att["filename"], "content_type": att["content_type"], "data": data}
             )
         if sum(len(a["data"]) for a in encoded) > MAX_TOTAL_ATTACHMENT_BYTES * 4 // 3:
-            raise AttachmentTooLarge("attachments exceed Suite's 25 MiB total cap")
+            raise AttachmentTooLarge("attachments exceed Burrow's 25 MiB total cap")
         payload = {"space_id": space_id, "content": content, "attachments": encoded}
         return await self.push("reply_with_media", payload, space_id)
 

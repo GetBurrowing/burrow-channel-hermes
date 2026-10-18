@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+
+- Product-name wording only: errors, help text, docstrings, the untrusted-content preamble and the platform hint say Burrow. Tool names, parameters, identifiers (`startup-suite-platform`, `startup_suite`, `suite-untrusted`, `source="startup-suite"`) and wire behaviour are unchanged.
+- The owner marker is now `[Burrow message from your owner ...]` (was `[Suite message from your owner ...]`). The plugin emits the new marker for trusted owners, and the platform hint names the new marker. An untrusted body spelling EITHER marker stays inside the `<suite-untrusted>` block (permanent test in `tests/test_trusted_principals.py`).
+- Restart running gateways to load this version, AND start a new session (`/new`) in each live conversation. Hermes puts the platform hint into the session's system prompt once and persists it in the session database; a continuing session reuses those stored bytes verbatim, across gateway restarts, until a new session, a context compression, or a model/provider/working-directory change rebuilds it (hermes-agent fdec926e `agent/conversation_loop.py` `_restore_or_build_system_prompt`). Until then that session's hint names the old marker while trusted messages arrive with the new one, so owner messages there may be treated with less trust than intended. Nothing becomes more trusted: the untrusted block is unchanged.
+
 ## v0.3.0
 
 - update.sh (and install.sh over an existing install) works on a host whose plugin is enabled. Hermes refuses to replace an enabled plugin that declares Python dependencies without a terminal user's consent ("Reinstall declined: dependency install skipped (non-interactive)"), which made update.sh (v0.2.0 and the earlier v0.3.0 work) exit 1 on an enabled host (measured at hermes-agent fdec926e in its default home and in a live profile). The installer now disables, reinstalls with `--no-enable`, and enables; any failure after the disable re-enables the plugin at the build still installed.
