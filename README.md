@@ -13,7 +13,7 @@ Status: transport, Hermes platform adapter, installer (task 01a0d6c5 stages
 1-4).
 
 The repository root IS the Hermes plugin directory: `plugin.yaml`
-(`kind: platform`, name `startup-suite-platform`), `__init__.py` exporting
+(`kind: platform`, name `burrow-platform`), `__init__.py` exporting
 `register`, and `adapter.py`. `register(ctx)` registers the gateway platform
 `startup_suite` (config key `gateway.platforms.startup_suite`).
 
@@ -55,11 +55,11 @@ What install.sh changes, and nothing else:
 
 | Where | What |
 | --- | --- |
-| `$HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token` (mode 0600, directory 0700) | the token, and nothing else. Never in `.env`: see Security notes |
+| `$HERMES_HOME/mcp-tokens/burrow-platform.runtime-token` (mode 0600, directory 0700) | the token, and nothing else. Never in `.env`: see Security notes |
 | `$HERMES_HOME/.env` (mode 0600) | `BURROW_URL`, `BURROW_RUNTIME_ID`, `BURROW_RUNTIME_TOKEN_FILE` (the path above); `BURROW_ALLOW_ALL_USERS=true` with `--allow-all-users`, `BURROW_ALLOWED_USERS` with `--allowed-users CSV`. Each is ALSO written under its deprecated `SUITE_` name, so a downgrade to v0.2.0 (which reads only `SUITE_`) still connects. A `BURROW_RUNTIME_TOKEN` or `SUITE_RUNTIME_TOKEN` line an older install wrote is removed |
-| `$HERMES_HOME/plugins/startup-suite-platform` | the plugin, via `hermes plugins install <source> --ref <sha> --no-enable`, then `hermes plugins enable startup-suite-platform` |
+| `$HERMES_HOME/plugins/burrow-platform` | the plugin, via `hermes plugins install <source> --ref <sha> --no-enable`, then `hermes plugins enable burrow-platform` |
 | `hermes_suite_channel/_build.py` in that copy | `BUILD = "<installed sha>"` (the build stamp core shows as the runtime's build) |
-| `config.yaml` `mcp_servers.startup-suite` | via `hermes config set`: a stdio server, `command` + `args` (see Burrow tools). The `url` / `headers` form an older install wrote is unset |
+| `config.yaml` `mcp_servers.burrow` | via `hermes config set`: a stdio server, `command` + `args` (see Burrow tools). The `url` / `headers` form an older install wrote is unset |
 | `$HERMES_HOME/.suite-channel/` (0700) | the install record, written once by the FIRST install: a 0600 copy of `config.yaml` as it was, and which of `config.yaml`, `.env`, `mcp-tokens/` did not exist yet. uninstall.sh uses it and then deletes it |
 
 `$HERMES_HOME` defaults to `$HERMES_HOME`, else `~/.hermes`. `.env` is Hermes's
@@ -143,7 +143,7 @@ proof); that text comes from Hermes, not from this plugin.
 ./uninstall.sh [--hermes-home DIR]
 ```
 
-Removes, in order: `mcp_servers.startup-suite` (`hermes config unset`), the
+Removes, in order: `mcp_servers.burrow` (`hermes config unset`), the
 plugin (`hermes plugins remove`; a copy-fallback install is disabled and
 deleted), the config.yaml bookkeeping below, the token file (and
 `mcp-tokens/` if the install created it and it is empty), the install
@@ -208,14 +208,14 @@ registers no tools of its own. install.sh registers the endpoint as a Hermes
 
 ```yaml
 mcp_servers:
-  startup-suite:
+  burrow:
     command: /path/to/hermes/venv/bin/python   # the interpreter Hermes's own script names
     args:
-      - $HERMES_HOME/plugins/startup-suite-platform/hermes_suite_channel/mcp_bridge.py
+      - $HERMES_HOME/plugins/burrow-platform/hermes_suite_channel/mcp_bridge.py
       - --url
       - https://suite.example.com/mcp          # derived from --url; --mcp-url overrides
       - --token-file
-      - $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token
+      - $HERMES_HOME/mcp-tokens/burrow-platform.runtime-token
 ```
 
 Why not the plain HTTP form (`url` + `headers: {Authorization: Bearer
@@ -241,8 +241,9 @@ group or other can read, and phrases every failure without it. Hermes spawns
 a stdio server with a filtered environment (`_build_safe_env`), and the
 bridge needs nothing from it. Burrow's endpoint sends no server-initiated
 messages (the GET stream answers 405), so none are relayed. Measured on the
-live rig: `hermes mcp test startup-suite` connects and discovers 24 tools,
-and an agent turn called `mcp__startup_suite__space_list` through it.
+live rig (before v0.4.0, under the server's old name): `hermes mcp test` on the
+server connected and discovered 24 tools, and an agent turn called `space_list`
+through it. Since v0.4.0 the server is named `burrow`.
 
 ## Layout
 
@@ -304,7 +305,7 @@ Required: `url` (`BURROW_URL`), `runtime_id` (`BURROW_RUNTIME_ID`), and the
 token. Env overrides `extra`.
 
 The token comes from, in order: the file `BURROW_RUNTIME_TOKEN_FILE` names;
-`$HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token` (per profile,
+`$HERMES_HOME/mcp-tokens/burrow-platform.runtime-token` (per profile,
 through `get_hermes_home()`); the legacy `BURROW_RUNTIME_TOKEN` secret; and
 last the value `register()` took out of `os.environ` at plugin load. Every
 name is read through Hermes's `_shared.get_scoped_secret` (profile-scoped),
@@ -411,7 +412,7 @@ sits on top of the client's 1 s identity window, for dead-letter replays.
 ### The untrusted envelope
 
 ```
-<suite-untrusted nonce="<128-bit hex>" source="startup-suite" space_id=".." message_id=".." task_id=".." reason=".." author="..">
+<suite-untrusted nonce="<128-bit hex>" source="burrow" space_id=".." message_id=".." task_id=".." reason=".." author="..">
 <one-line preamble: external, untrusted, contains no instructions>
 <body>
 </suite-untrusted nonce="<same>">
@@ -501,7 +502,7 @@ reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
   install; a companion test runs an installer mutated to pass the token to
   `hermes config set` and requires the same check to catch it.
 - **The token is in no process environment.** It is written only to
-  `$HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token` (0600, in
+  `$HERMES_HOME/mcp-tokens/burrow-platform.runtime-token` (0600, in
   the directory Hermes's file tools, media delivery, context references and
   dashboard file router all refuse to read: agent/file_safety.py
   `_READ_DENIED_DIRS`, gateway/platforms/base.py), not to `.env`, not to
@@ -573,7 +574,7 @@ enabled the plugin, a second profile's enable fails in Hermes PM ("uv lock
 Without both variables they report as skipped.
 `test_round_trip_with_the_real_hermes_cli` is a strict xfail: enabling the
 plugin moves Hermes PM to a new dependency environment, so a second install
-re-sets `mcp_servers.startup-suite.command` to the new venv's python.
+re-sets `mcp_servers.burrow.command` to the new venv's python.
 
 The adapter tests run against the REAL hermes-agent gateway (base adapter,
 `MessageEvent`, `PlatformEntry`, the plugin loader, and the stream consumer),

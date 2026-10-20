@@ -36,7 +36,7 @@ UPDATED = "hermes-suite-channel: updated"
 
 PRE_CONFIG = "# user config, hand written\nmodel:\n  default: qwen3.5-9b  # trailing comment\n"
 PRE_ENV = 'OPENAI_API_KEY=dummy-not-a-key\nexport FOO="bar baz"\n# a comment line\n'
-TOKEN_REL = "mcp-tokens/startup-suite-platform.runtime-token"
+TOKEN_REL = "mcp-tokens/burrow-platform.runtime-token"
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -198,7 +198,7 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
     assert stat.S_IMODE(token_path(home).stat().st_mode) == 0o600
     assert stat.S_IMODE(token_path(home).parent.stat().st_mode) == 0o700
 
-    plugin = home / "plugins" / "startup-suite-platform"
+    plugin = home / "plugins" / "burrow-platform"
     assert (plugin / "plugin.yaml").is_file()
     sha = _git(checkout, "rev-parse", "HEAD")
     assert (plugin / "hermes_suite_channel" / "_build.py").read_text().count(
@@ -209,7 +209,7 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
     assert cfg_text.startswith(PRE_CONFIG)
     assert token not in cfg_text
     cfg = config(home)
-    assert cfg["mcp_servers"]["startup-suite"] == {
+    assert cfg["mcp_servers"]["burrow"] == {
         "command": sys.executable,
         "args": [
             str(plugin / "hermes_suite_channel" / "mcp_bridge.py"),
@@ -219,10 +219,10 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
             str(token_path(home)),
         ],
     }
-    assert cfg["plugins"]["enabled"] == ["startup-suite-platform"]
+    assert cfg["plugins"]["enabled"] == ["burrow-platform"]
 
     calls = stub_calls(env)
-    assert ["plugins", "enable", "startup-suite-platform"] in calls
+    assert ["plugins", "enable", "burrow-platform"] in calls
     assert [c[:2] for c in calls if c[:2] == ["plugins", "install"]] == [["plugins", "install"]]
 
 
@@ -299,7 +299,7 @@ def test_round_trip_restores_every_preexisting_byte(checkout, home, env, token):
     after = snapshot(home)
     assert {k: after.get(k) for k in before} == before
     assert sha(home / "config.yaml") == hashlib.sha256(PRE_CONFIG.encode()).hexdigest()
-    assert not (home / "plugins" / "startup-suite-platform").exists()
+    assert not (home / "plugins" / "burrow-platform").exists()
     assert set(after) - set(before) == set()
     assert not (home / "mcp-tokens").exists()
     assert not (home / ".suite-channel").exists()
@@ -419,7 +419,7 @@ def test_repo_env_var_reaches_the_clone(checkout, home, env, token, tmp_path):
     assert f"cloning {checkout}\n" in proc.stderr
     assert DEFAULT_REPO_URL not in proc.stderr
     head = _git(checkout, "rev-parse", "HEAD")
-    plugin = home / "plugins" / "startup-suite-platform"
+    plugin = home / "plugins" / "burrow-platform"
     assert f'BUILD = "{head}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
 
 
@@ -498,7 +498,7 @@ def test_update_resolves_the_env_var_and_passes_it_on(checkout, home, env, token
     )
     assert proc.returncode == 0, proc.stderr
     assert last_line(proc) == UPDATED
-    plugin = home / "plugins" / "startup-suite-platform"
+    plugin = home / "plugins" / "burrow-platform"
     assert f'BUILD = "{new_sha}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
 
 
@@ -647,18 +647,18 @@ def test_copy_fallback_is_opt_in(checkout, home, env, token):
     refused = install(checkout, home, env, token)
     assert refused.returncode != 0
     assert "--copy-fallback" in refused.stderr
-    assert not (home / "plugins" / "startup-suite-platform").exists()
+    assert not (home / "plugins" / "burrow-platform").exists()
 
     ok = install(checkout, home, env, token, "--copy-fallback")
     assert ok.returncode == 0, ok.stderr
     assert last_line(ok) == INSTALLED
     sha = _git(checkout, "rev-parse", "HEAD")
-    build = home / "plugins" / "startup-suite-platform" / "hermes_suite_channel" / "_build.py"
+    build = home / "plugins" / "burrow-platform" / "hermes_suite_channel" / "_build.py"
     assert f'BUILD = "{sha}"' in build.read_text()
 
     un = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env)
     assert un.returncode == 0, un.stderr
-    assert not (home / "plugins" / "startup-suite-platform").exists()
+    assert not (home / "plugins" / "burrow-platform").exists()
 
 
 # --------------------------------------------------------------------- scan
@@ -683,7 +683,7 @@ def test_caution_scan_refused_on_request(checkout, home, env, token):
     proc = install(checkout, home, env, token, "--refuse-scan-caution")
     assert proc.returncode != 0
     assert not any("--force" in c for c in _install_calls(env))
-    assert not (home / "plugins" / "startup-suite-platform").exists()
+    assert not (home / "plugins" / "burrow-platform").exists()
 
 
 def test_dangerous_scan_is_never_forced(checkout, home, env, token):
@@ -710,7 +710,7 @@ def test_update_moves_the_plugin_and_keeps_the_config(checkout, home, env, token
     proc = run(checkout / "update.sh", "--hermes-home", str(home), env=env)
     assert proc.returncode == 0, proc.stderr
     assert last_line(proc) == UPDATED
-    plugin = home / "plugins" / "startup-suite-platform"
+    plugin = home / "plugins" / "burrow-platform"
     assert (plugin / "NEWFILE").is_file()
     assert f'BUILD = "{new_sha}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
     assert (home / ".env").read_bytes() == env_before
@@ -760,7 +760,7 @@ def _plugin_verbs(env) -> list[str]:
 
 
 def _build(home: Path) -> str:
-    f = home / "plugins" / "startup-suite-platform" / "hermes_suite_channel" / "_build.py"
+    f = home / "plugins" / "burrow-platform" / "hermes_suite_channel" / "_build.py"
     return f.read_text().split('BUILD = "')[1].split('"')[0]
 
 
@@ -781,7 +781,7 @@ def test_update_over_an_enabled_plugin_disables_installs_enables(checkout, home,
     installs = _install_calls(env)
     assert len(installs) == 1 and "--force" in installs[0] and "--no-enable" in installs[0]
     assert _build(home) == new_sha
-    assert _enabled(home) == ["startup-suite-platform"]
+    assert _enabled(home) == ["burrow-platform"]
     # disable + enable give config.yaml back byte for byte (real CLI measured
     # the same; the stub mirrors it).
     assert (home / "config.yaml").read_bytes() == cfg_before
@@ -822,8 +822,8 @@ def test_failed_reinstall_re_enables_the_old_version(checkout, home, env, token)
     assert verbs[0] == "disable" and verbs[-1] == "enable" and "install" in verbs
     assert "re-enabled" in proc.stderr
     assert _build(home) == old_sha
-    assert not (home / "plugins" / "startup-suite-platform" / "NEWFILE").exists()
-    assert _enabled(home) == ["startup-suite-platform"]
+    assert not (home / "plugins" / "burrow-platform" / "NEWFILE").exists()
+    assert _enabled(home) == ["burrow-platform"]
     assert (home / "config.yaml").read_bytes() == cfg_before
 
 
@@ -856,20 +856,20 @@ def test_unknown_ref_fails_before_any_disable(checkout, home, env, token):
     )
     assert proc.returncode != 0 and "no such commit" in proc.stderr
     assert "disable" not in _plugin_verbs(env)
-    assert _enabled(home) == ["startup-suite-platform"]
+    assert _enabled(home) == ["burrow-platform"]
 
 
 def test_update_of_a_disabled_plugin_does_not_disable_first(checkout, home, env, token):
     """The path for a plugin that is installed but not enabled is unchanged:
     install --force, then enable."""
     assert install(checkout, home, env, token).returncode == 0
-    subprocess.run(["hermes", "plugins", "disable", "startup-suite-platform"], env=env, check=True)
+    subprocess.run(["hermes", "plugins", "disable", "burrow-platform"], env=env, check=True)
     Path(env["HERMES_STUB_LOG"]).unlink()
     new_sha = _commit_next(checkout)
     proc = run(checkout / "update.sh", "--hermes-home", str(home), env=env)
     assert proc.returncode == 0, proc.stderr
     assert _plugin_verbs(env) == ["install", "enable"]
-    assert _build(home) == new_sha and _enabled(home) == ["startup-suite-platform"]
+    assert _build(home) == new_sha and _enabled(home) == ["burrow-platform"]
 
 
 # ----------------------------------------------------- config.yaml round trip
@@ -933,7 +933,7 @@ def test_a_preexisting_plugins_block_survives_byte_for_byte(checkout, home, env,
     original = PRE_CONFIG + "plugins:\n  enabled:\n    - some-other-plugin\n"
     (home / "config.yaml").write_text(original)
     assert install(checkout, home, env, token).returncode == 0
-    assert config(home)["plugins"]["enabled"] == ["some-other-plugin", "startup-suite-platform"]
+    assert config(home)["plugins"]["enabled"] == ["some-other-plugin", "burrow-platform"]
     _uninstall(checkout, home, env)
     assert (home / "config.yaml").read_text() == original
 
@@ -944,18 +944,18 @@ def test_install_over_a_legacy_install_migrates_the_token_and_mcp_entry(checkout
     (home / ".env").write_text(PRE_ENV + f"SUITE_RUNTIME_TOKEN={token}\n")
     (home / "config.yaml").write_text(
         PRE_CONFIG
-        + "mcp_servers:\n  startup-suite:\n    url: https://suite.example.test/mcp\n"
+        + "mcp_servers:\n  burrow:\n    url: https://suite.example.test/mcp\n"
         + "    headers:\n      Authorization: Bearer ${SUITE_RUNTIME_TOKEN}\n"
     )
     proc = install(checkout, home, env, token)
     assert proc.returncode == 0, proc.stderr
     assert "SUITE_RUNTIME_TOKEN=" not in (home / ".env").read_text()
-    entry = config(home)["mcp_servers"]["startup-suite"]
+    entry = config(home)["mcp_servers"]["burrow"]
     assert set(entry) == {"command", "args"}
     assert "SUITE_RUNTIME_TOKEN" not in (home / "config.yaml").read_text()
     assert (home / ".suite-channel" / "record").read_text().startswith("pre_install_known=0\n")
     _uninstall(checkout, home, env)
-    assert "startup-suite" not in (home / "config.yaml").read_text()
+    assert "burrow" not in (home / "config.yaml").read_text()
 
 
 def test_find_hermes_python_is_the_same_code_in_both_scripts():
@@ -1005,7 +1005,7 @@ def _sh_env(env: dict, launcher: Path, **extra: str) -> dict:
 
 
 def _mcp_command(home: Path) -> str:
-    return config(home)["mcp_servers"]["startup-suite"]["command"]
+    return config(home)["mcp_servers"]["burrow"]["command"]
 
 
 def test_a_sh_launcher_resolves_to_the_venv_hermes_selects(checkout, home, env, token, tmp_path):
@@ -1092,7 +1092,7 @@ def test_uninstall_through_a_sh_launcher(checkout, home, env, token, tmp_path):
         checkout / "uninstall.sh", "--hermes-home", str(home), "--hermes", str(launcher), env=e
     )
     assert un.returncode == 0, un.stderr
-    assert "startup-suite" not in (home / "config.yaml").read_text()
+    assert "burrow" not in (home / "config.yaml").read_text()
 
 
 # --------------------------------------------------------- the REAL hermes
@@ -1145,7 +1145,7 @@ def real_home():
     # ONE real test per Hermes root. Measured at fdec926e: after one profile
     # enabled this plugin and was removed and deleted, a second profile's
     # `hermes plugins enable` fails ("uv lock ... Distribution not found at
-    # .../plugin-sources/startup-suite-platform-<id>"), with or without
+    # .../plugin-sources/burrow-platform-<id>"), with or without
     # `plugins remove` first. Run each @real test against a fresh root
     # (e.g. one container per test, `pytest -k <name>`); a second one fails
     # here, by name, instead of with that error.
@@ -1167,7 +1167,7 @@ def real_home():
     try:
         yield home
     finally:
-        _real_hermes("plugins", "remove", "startup-suite-platform", home=home)
+        _real_hermes("plugins", "remove", "burrow-platform", home=home)
         _real_hermes("profile", "delete", "-y", name)
 
 
@@ -1189,7 +1189,7 @@ def _real_update(co: Path, home: Path, *extra: str):
     strict=True,
     reason="pre-existing, measured at hermes-agent fdec926e: enabling the plugin moves Hermes PM "
     "to a new dependency environment, so the second install re-sets "
-    "mcp_servers.startup-suite.command to the new environments/<id>/venv python",
+    "mcp_servers.burrow.command to the new environments/<id>/venv python",
 )
 def test_round_trip_with_the_real_hermes_cli(checkout, real_home, token):
     """Same round trip against hermes-agent itself: config.yaml returns to its
@@ -1240,13 +1240,13 @@ def test_real_hermes_declines_the_reinstall_without_the_disable_step(
     assert proc.returncode != 0
     assert "Reinstall declined: dependency install skipped (non-interactive)" in proc.stderr
     assert _build(real_home) == old_sha
-    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    assert _real_enabled(real_home) == ["burrow-platform"]
 
 
 @real
 def test_real_hermes_update_over_an_enabled_plugin(checkout, real_home, token):
     assert _real_install(checkout, real_home, token).returncode == 0
-    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    assert _real_enabled(real_home) == ["burrow-platform"]
     cfg_before = (real_home / "config.yaml").read_bytes()
     env_before = (real_home / ".env").read_bytes()
     new_sha = _commit_next(checkout)
@@ -1254,8 +1254,8 @@ def test_real_hermes_update_over_an_enabled_plugin(checkout, real_home, token):
     assert proc.returncode == 0, proc.stderr
     assert last_line(proc) == UPDATED
     assert _build(real_home) == new_sha
-    assert (real_home / "plugins" / "startup-suite-platform" / "NEWFILE").is_file()
-    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    assert (real_home / "plugins" / "burrow-platform" / "NEWFILE").is_file()
+    assert _real_enabled(real_home) == ["burrow-platform"]
     assert (real_home / "config.yaml").read_bytes() == cfg_before
     assert (real_home / ".env").read_bytes() == env_before
 
@@ -1273,11 +1273,11 @@ def test_real_hermes_refused_reinstall_re_enables_the_old_version(checkout, real
     _git(checkout, "commit", "-q", "-am", "a manifest Hermes refuses")
     proc = _real_update(checkout, real_home)
     assert proc.returncode != 0
-    assert "disabling plugin startup-suite-platform" in proc.stderr
+    assert "disabling plugin burrow-platform" in proc.stderr
     assert "manifest_version 999" in proc.stderr
     assert "re-enabled" in proc.stderr
     assert _build(real_home) == old_sha
-    assert _real_enabled(real_home) == ["startup-suite-platform"]
+    assert _real_enabled(real_home) == ["burrow-platform"]
     assert (real_home / "config.yaml").read_bytes() == cfg_before
 
 
@@ -1422,9 +1422,9 @@ async def test_v020_host_upgraded_by_update_sh_connects(checkout, home, env, tok
         from hermes_cli import plugins_loader
 
         monkeypatch.setattr(plugins_loader, "_BARE_MODULE_SCOPE", {})
-        for name in [m for m in _sys.modules if m.startswith("hermes_plugins.startup_suite")]:
+        for name in [m for m in _sys.modules if m.startswith("hermes_plugins.burrow_platform")]:
             monkeypatch.delitem(_sys.modules, name)
-        plugin = home / "plugins" / "startup-suite-platform"
+        plugin = home / "plugins" / "burrow-platform"
         manifest = parse_manifest_file(plugin / "plugin.yaml", plugin, "user", "")
         manager = PluginManager()
         module = manager._load_directory_module(manifest)

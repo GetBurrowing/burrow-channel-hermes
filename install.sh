@@ -15,7 +15,7 @@
 #   3. a no-echo prompt on the controlling terminal.
 #
 # What it changes, and nothing else (uninstall.sh reverses exactly this):
-#   - $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token: the token,
+#   - $HERMES_HOME/mcp-tokens/burrow-platform.runtime-token: the token,
 #     mode 0600. NOT .env: Hermes copies .env into the gateway's os.environ on
 #     every turn, and children it spawns without a scrub inherit that (README,
 #     "Security notes"). mcp-tokens/ is the directory Hermes's own file tools
@@ -25,9 +25,9 @@
 #     asked), each ALSO written under its deprecated SUITE_ name so a
 #     downgrade to v0.2.0 still connects; mode 0600. A BURROW_RUNTIME_TOKEN or
 #     SUITE_RUNTIME_TOKEN line from an older install is removed.
-#   - the plugin `startup-suite-platform`, installed and enabled through
+#   - the plugin `burrow-platform`, installed and enabled through
 #     `hermes plugins install` + `hermes plugins enable`;
-#   - config.yaml `mcp_servers.startup-suite`: a stdio server running the
+#   - config.yaml `mcp_servers.burrow`: a stdio server running the
 #     plugin's hermes_suite_channel/mcp_bridge.py, which relays to
 #     https://<host>/mcp and reads the token from the file itself, so neither
 #     config.yaml nor any environment holds it;
@@ -40,9 +40,9 @@
 
 set -euo pipefail
 
-readonly PLUGIN_NAME="startup-suite-platform"
-readonly MCP_NAME="startup-suite"
-readonly TOKEN_RELPATH="mcp-tokens/startup-suite-platform.runtime-token"
+readonly PLUGIN_NAME="burrow-platform"
+readonly MCP_NAME="burrow"
+readonly TOKEN_RELPATH="mcp-tokens/burrow-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
 # Clone source when not run from a checkout. Precedence: --repo, then the
 # HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated

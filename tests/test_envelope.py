@@ -120,7 +120,7 @@ def test_header_carries_correlation_ids_and_escapes_values():
     p["message"]["author"] = evil_author
     wrapped = wrap_untrusted(p, nonce=NONCE)
     header = wrapped.split("\n")[0]
-    assert header.startswith(f'<{TAG} nonce="{NONCE}" source="startup-suite" ')
+    assert header.startswith(f'<{TAG} nonce="{NONCE}" source="burrow" ')
     for key, value in [
         ("space_id", "sp-01a0d6c5"),
         ("message_id", "m-01a0d6c5"),

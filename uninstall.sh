@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Remove what install.sh added to a Hermes Agent home, and nothing else:
-#   - config.yaml `mcp_servers.startup-suite` (through `hermes config unset`);
-#   - the plugin `startup-suite-platform` (through `hermes plugins remove`);
+#   - config.yaml `mcp_servers.burrow` (through `hermes config unset`);
+#   - the plugin `burrow-platform` (through `hermes plugins remove`);
 #   - the bookkeeping Hermes's own writer added to config.yaml on the way
 #     (`plugins: {enabled: [], disabled: []}`, `_config_version`), when the
 #     install record shows it was not there before: config.yaml goes back to
 #     the saved pre-install bytes when every other key still matches, and
 #     otherwise (the file was edited since) only those keys are removed;
-#   - the token file $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token
+#   - the token file $HERMES_HOME/mcp-tokens/burrow-platform.runtime-token
 #     (and mcp-tokens/ itself, if the install created it and it is empty);
 #   - the install record $HERMES_HOME/.suite-channel/;
 #   - the .env lines defining BURROW_URL, BURROW_RUNTIME_ID,
@@ -29,13 +29,13 @@
 
 set -euo pipefail
 
-readonly PLUGIN_NAME="startup-suite-platform"
-readonly MCP_NAME="startup-suite"
+readonly PLUGIN_NAME="burrow-platform"
+readonly MCP_NAME="burrow"
 readonly ENV_KEYS=(
   BURROW_URL BURROW_RUNTIME_ID BURROW_RUNTIME_TOKEN_FILE BURROW_RUNTIME_TOKEN BURROW_ALLOW_ALL_USERS BURROW_ALLOWED_USERS
   SUITE_URL SUITE_RUNTIME_ID SUITE_RUNTIME_TOKEN_FILE SUITE_RUNTIME_TOKEN SUITE_ALLOW_ALL_USERS SUITE_ALLOWED_USERS
 )
-readonly TOKEN_RELPATH="mcp-tokens/startup-suite-platform.runtime-token"
+readonly TOKEN_RELPATH="mcp-tokens/burrow-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
 readonly RESULT_LINE="hermes-suite-channel: uninstalled"
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.4.0
+
+Straight rename of the identifiers that still carried the old product name. No alias and no dual-name support: this installer, `update.sh` and `uninstall.sh` read and write only the new names.
+
+| What | Was | Now |
+| --- | --- | --- |
+| MCP server id (`config.yaml` `mcp_servers.<id>`, `MCP_NAME` in install.sh / uninstall.sh) | `startup-suite` | `burrow` |
+| Plugin name (`plugin.yaml` `name:`, `PLUGIN_NAME` in install.sh / uninstall.sh / update.sh, the `$HERMES_HOME/plugins/<name>` directory, `plugins.enabled`) | `startup-suite-platform` | `burrow-platform` |
+| Token file (`TOKEN_RELPATH` in install.sh / uninstall.sh, `TOKEN_FILE_RELPATH` in `hermes_suite_channel/config.py`) | `$HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token` | `$HERMES_HOME/mcp-tokens/burrow-platform.runtime-token` |
+| Untrusted envelope `source=` attribute (`SOURCE` in `hermes_suite_channel/envelope.py`) | `source="startup-suite"` | `source="burrow"` |
+| Hermes module namespace of the loaded plugin (derived by Hermes from the plugin name) | `hermes_plugins.startup_suite_platform` | `hermes_plugins.burrow_platform` |
+
+- Tools reached through the MCP server are named by Hermes from the server id, so they move from the `startup_suite` prefix to the `burrow` prefix. Burrow's tool names themselves are unchanged.
+- **Existing installs are renamed by burrow-cli, not by this installer.** `burrow hermes` (burrow-cli 0.12.0) moves an existing home's old MCP entry, plugin and token file to the new names on the agent's next START (never on an attach to a live session), then runs this installer. By hand, over an install made with an older version: this `update.sh` refuses (no `plugins/burrow-platform` yet, "run install.sh first"), and this `install.sh` does NOT remove the old names, so the home would end up with both generations (two MCP servers, two enabled platform plugins). Likewise this `uninstall.sh` removes only the new names. Use `burrow hermes` to move an existing home, or uninstall with the older version's `uninstall.sh` first.
+- No `/new` is needed for the rename itself. The persisted platform hint (see v0.3.1) names neither `startup-suite` nor the plugin, so stored system prompts stay accurate. Earlier turns in a continuing session still show the old `source=` value and old tool-name prefix; new turns use the new ones. Restart the gateway to load this version.
+- Deliberately unchanged: the gateway platform key `startup_suite` (`PLATFORM_NAME`, underscore form; it keys Hermes sessions and `platform_toolsets.startup_suite`, so renaming it would orphan session state, and it is not an MCP id), the Python package directory `hermes_suite_channel`, the installer result lines (`hermes-suite-channel: installed` / `updated` / `uninstalled`), the install record directory `$HERMES_HOME/.suite-channel/`, the `<suite-untrusted>` tag name, `client_info.product` `hermes_channel`, and LICENSE.
+
 ## v0.3.1
 
 - Product-name wording only: errors, help text, docstrings, the untrusted-content preamble and the platform hint say Burrow. Tool names, parameters, identifiers (`startup-suite-platform`, `startup_suite`, `suite-untrusted`, `source="startup-suite"`) and wire behaviour are unchanged.

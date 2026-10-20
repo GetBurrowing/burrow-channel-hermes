@@ -45,7 +45,7 @@ class FakeCtx:
 
     def register_platform(self, **kwargs):
         self.kwargs = kwargs
-        entry = PlatformEntry(source="plugin", plugin_name="startup-suite-platform", **kwargs)
+        entry = PlatformEntry(source="plugin", plugin_name="burrow-platform", **kwargs)
         platform_registry.register(entry)
         return entry
 

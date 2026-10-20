@@ -28,7 +28,7 @@ class _Ctx:
     only accepts 'startup_suite' once it is in the registry)."""
 
     def register_platform(self, **kwargs):
-        entry = PlatformEntry(source="plugin", plugin_name="startup-suite-platform", **kwargs)
+        entry = PlatformEntry(source="plugin", plugin_name="burrow-platform", **kwargs)
         platform_registry.register(entry)
         return entry
 

@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-readonly PLUGIN_NAME="startup-suite-platform"
+readonly PLUGIN_NAME="burrow-platform"
 # Clone source when not run from a checkout. Precedence: --repo, then the
 # HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
 # HERMES_SUITE_CHANNEL_REPO, then this default.

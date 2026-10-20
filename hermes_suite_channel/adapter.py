@@ -173,7 +173,7 @@ def _default_token_file() -> Path | None:
 def load_suite_config(extra: dict[str, Any] | None) -> SuiteConfig:
     """The adapter's settings. The token comes from, in order: the file named
     by BURROW_RUNTIME_TOKEN_FILE (or SUITE_RUNTIME_TOKEN_FILE),
-    $HERMES_HOME/mcp-tokens/startup-suite-platform.runtime-token, the scoped
+    $HERMES_HOME/mcp-tokens/burrow-platform.runtime-token, the scoped
     BURROW_RUNTIME_TOKEN (or SUITE_RUNTIME_TOKEN) secret, and last the value
     ``_take_env_token`` removed from os.environ. That last one is the launch
     profile's, so it is never used inside a multiplexed secondary profile's
