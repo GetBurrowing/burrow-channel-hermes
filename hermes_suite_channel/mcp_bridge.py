@@ -45,6 +45,12 @@ from typing import Any
 SERVER_ERROR = -32000
 PARSE_ERROR = -32700
 MAX_WORKERS = 8
+# Sent on every request: Cloudflare in front of some Burrow hosts answers
+# urllib's default ``Python-urllib/3.x`` with ``403 error code: 1010``. The
+# bridge never imports the plugin package (Hermes runs this file by path), so
+# the version is spelled here and tests/test_mcp_bridge.py pins it to
+# hermes_suite_channel.__version__.
+USER_AGENT = "burrow-channel-hermes/0.4.1"
 
 
 class BridgeError(Exception):
@@ -111,6 +117,7 @@ class Bridge:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
+            "User-Agent": USER_AGENT,
             "Authorization": f"Bearer {token}",
         }
         with self._state:

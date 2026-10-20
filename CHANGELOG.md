@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.1
+
+- The MCP bridge (`hermes_suite_channel/mcp_bridge.py`) sends `User-Agent: burrow-channel-hermes/<version>` on every request. It used urllib's default `Python-urllib/3.x`, which Cloudflare in front of some Burrow hosts refuses with `403 error code: 1010`, so the agent's Burrow tools failed on those hosts.
+- `hermes_suite_channel.__version__` and `plugin.yaml` `version:` are corrected: both still read `0.3.1` through v0.4.0. A test now pins them, and the bridge's User-Agent version, to `pyproject.toml`.
+
 ## v0.4.0
 
 Straight rename of the identifiers that still carried the old product name. No alias and no dual-name support: this installer, `update.sh` and `uninstall.sh` read and write only the new names.

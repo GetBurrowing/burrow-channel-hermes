@@ -8,14 +8,17 @@ import os
 import subprocess
 import sys
 import threading
+import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
-from hermes_suite_channel.mcp_bridge import parse_sse
+from hermes_suite_channel import __version__
+from hermes_suite_channel.mcp_bridge import USER_AGENT, parse_sse
 
-BRIDGE = Path(__file__).resolve().parent.parent / "hermes_suite_channel" / "mcp_bridge.py"
+ROOT = Path(__file__).resolve().parent.parent
+BRIDGE = ROOT / "hermes_suite_channel" / "mcp_bridge.py"
 TOKEN = "tok-bridge-SENTINEL-01a0d6c5"
 
 
@@ -118,6 +121,36 @@ def test_relays_requests_and_carries_the_token_only_in_the_header(token_file, ss
     # The protocol version initialize returned rides on every later request.
     assert fake.seen[2]["headers"].get("mcp-protocol-version") == "2025-06-18"
     assert TOKEN not in proc.stdout + proc.stderr
+
+
+def test_every_request_carries_the_burrow_user_agent(token_file):
+    """Cloudflare in front of some Burrow hosts answers urllib's default
+    Python-urllib/3.x with 403 error code 1010, so the bridge names itself."""
+    fake = FakeSuiteMCP(TOKEN)
+    try:
+        proc, replies = run_bridge(fake.url, token_file, [INIT, INITIALIZED, LIST])
+    finally:
+        fake.close()
+    assert proc.returncode == 0, proc.stderr
+    assert len(fake.seen) == 3
+    assert [s["headers"].get("user-agent") for s in fake.seen] == [
+        "burrow-channel-hermes/0.4.1"
+    ] * 3
+
+
+def test_version_strings_match_pyproject():
+    """The bridge runs by path and never imports the package, so its
+    User-Agent spells the version; this keeps every copy on pyproject's."""
+    with open(ROOT / "pyproject.toml", "rb") as f:
+        version = tomllib.load(f)["project"]["version"]
+    plugin_version = next(
+        line.split(":", 1)[1].strip()
+        for line in (ROOT / "plugin.yaml").read_text().splitlines()
+        if line.startswith("version:")
+    )
+    assert __version__ == version
+    assert plugin_version == version
+    assert USER_AGENT == f"burrow-channel-hermes/{version}"
 
 
 def test_a_refused_token_is_an_error_reply_that_does_not_carry_it(token_file):
