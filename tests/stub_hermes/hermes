@@ -165,7 +165,7 @@ def plugins(args: list[str]) -> None:
         if not src.startswith("file://"):
             fail(f"Error: stub cannot fetch {src}")
         repo = src[len("file://") :]
-        name = "startup-suite-platform"
+        name = "burrow-platform"
         target = home() / "plugins" / name
         if target.exists() and "--force" not in rest:
             fail(f"Plugin '{name}' already exists.")

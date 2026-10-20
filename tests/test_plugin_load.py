@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_hermes_loads_and_registers_the_plugin(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     manifest = parse_manifest_file(ROOT / "plugin.yaml", ROOT, "user", "")
-    assert (manifest.name, manifest.kind) == ("startup-suite-platform", "platform")
+    assert (manifest.name, manifest.kind) == ("burrow-platform", "platform")
     # No requires_env: Hermes prompts for each unset one at install, and an
     # entry names ONE spelling (see plugin.yaml and test_install_prompt_*).
     assert manifest.requires_env == []
@@ -48,18 +48,18 @@ def test_hermes_loads_and_registers_the_plugin(monkeypatch, tmp_path):
 
     manager = PluginManager()
     module = manager._load_directory_module(manifest)
-    assert module.__name__ == "hermes_plugins.startup_suite_platform"
+    assert module.__name__ == "hermes_plugins.burrow_platform"
     assert callable(module.register)
     module.register(PluginContext(manifest, manager))
     entry = platform_registry.get("startup_suite")
     assert entry is not None and entry.label == "Burrow"
-    assert entry.adapter_factory.__module__.startswith("hermes_plugins.startup_suite_platform.")
+    assert entry.adapter_factory.__module__.startswith("hermes_plugins.burrow_platform.")
 
 
 V020_ENV = (
     "SUITE_URL=wss://suite.example.test/runtime/ws\n"
     "SUITE_RUNTIME_ID=rt-01a0d6c5\n"
-    "SUITE_RUNTIME_TOKEN_FILE=/h/mcp-tokens/startup-suite-platform.runtime-token\n"
+    "SUITE_RUNTIME_TOKEN_FILE=/h/mcp-tokens/burrow-platform.runtime-token\n"
 )
 BURROW_ONLY_ENV = V020_ENV.replace("SUITE_", "BURROW_")
 

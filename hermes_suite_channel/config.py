@@ -140,7 +140,7 @@ _REQUIRED: dict[str, EnvPair] = {
 # it (agent/file_safety.py _READ_DENIED_DIRS, gateway/platforms/base.py), the
 # same protection $HERMES_HOME/.env gets. Hermes names its own files there
 # `<server>.json` / `.client.json` / `.meta.json`, so this name cannot collide.
-TOKEN_FILE_RELPATH = Path("mcp-tokens") / "startup-suite-platform.runtime-token"
+TOKEN_FILE_RELPATH = Path("mcp-tokens") / "burrow-platform.runtime-token"
 
 # Read from env ONLY, never from ``extra``. Hermes serialises a platform's
 # ``extra`` dict in ``PlatformConfig.to_dict()`` (gateway/config.py), which
