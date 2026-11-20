@@ -50,7 +50,7 @@ MAX_WORKERS = 8
 # bridge never imports the plugin package (Hermes runs this file by path), so
 # the version is spelled here and tests/test_mcp_bridge.py pins it to
 # hermes_burrow_channel.__version__.
-USER_AGENT = "burrow-channel-hermes/0.5.0"
+USER_AGENT = "burrow-channel-hermes/0.5.1"
 
 
 class BridgeError(Exception):

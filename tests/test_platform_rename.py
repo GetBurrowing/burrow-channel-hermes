@@ -282,6 +282,23 @@ def test_a_running_gateway_refuses_and_changes_nothing(home, monkeypatch):
     assert _keys(home) == before
 
 
+def test_a_real_running_gateway_refuses_and_changes_nothing(home):
+    """No monkeypatch: a child holds this home's gateway lock through
+    Hermes's own writers (tests/test_gateway_running.py)."""
+    from test_gateway_running import _start, _stop
+
+    _old_home(home)
+    before = _keys(home)
+    child = _start(home)
+    try:
+        with pytest.raises(GatewayRunning, match="Stop it"):
+            migrate_home(home)
+    finally:
+        _stop(child)
+    assert _keys(home) == before
+    assert migrate_home(home)["moved"]  # and moves once it is gone
+
+
 def test_a_running_gateway_with_nothing_to_move_is_fine(home, monkeypatch):
     monkeypatch.setattr(platform_rename, "gateway_running", lambda _home: True)
     assert migrate_home(home)["moved"] == {}

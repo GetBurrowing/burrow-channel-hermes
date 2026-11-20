@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.1
+
+- **Fix: Hermes refused to load v0.5.0.** `platform_rename.py` imported `gateway.status.is_gateway_running`, which Hermes's September 2026 decomposition deleted and its `COMPAT_MANIFEST.md` lists as "removed; no replacement — vendor a copy". From 2026-09-14 Hermes's loader disables any plugin whose source names such a path, the WHOLE plugin, though the import sat inside one migration helper: `Plugin 'burrow-platform' not loaded: uses 1 import path(s) removed on 2026-09-14`, then "No messaging platforms enabled" and every `burrow` session skipped as "not a valid Platform". Hosts that set `plugins.allow_deprecated_imports: true` as a workaround can drop it after updating.
+- `platform_rename.gateway_running` is now a vendored, read-only equivalent: running when a process holds the home's `gateway.lock`, or when `gateway_state.json` names a live PID (start-time reuse guard, same `hermes_home`, not `stopped` / `startup_failed`) for a launch-service gateway whose `gateway.pid` was unlinked. It never unlinks, creates or rewrites a file, stale or not (Hermes's own probe deletes a stale pid file and lock). tests/test_gateway_running.py drives it against identity files written by Hermes's own `acquire_gateway_runtime_lock` / `write_pid_file` / `write_runtime_status` in a child process, with a control showing Hermes's probe deleting the same stale files.
+- **Regression guard, tests/test_hermes_compat.py:** runs Hermes's own compat scanner (`hermes_cli.plugin_compat.scan_plugin`) and loader gate (`disable_reason`, dated after the removal) over this repository, from the hermes-agent commit CI pins. It failed on v0.5.0 (`hermes_burrow_channel/platform_rename.py:419 gateway.status.is_gateway_running`). A positive control shows the same scanner and gate firing on a copy of that import. tests/test_plugin_load.py missed this because it calls `_load_directory_module` directly, past the compat gate. No other import in the plugin is flagged.
+
 ## v0.5.0
 
 The last identifiers that still carried the old product name, renamed, the gateway platform key included, with a migration so an existing home keeps its sessions, toolsets and home channel. The v0.4.0 entry below explains why the platform key was left alone then; this release renames it anyway and moves the state keyed on it.
