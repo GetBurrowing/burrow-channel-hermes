@@ -1,8 +1,9 @@
 """TEMPORARY RENAME GUARD (Burrow rename F, task 01a14ccb).
 
-Delete this file once Burrow release task E (01a14ba0) finishes: E retires
-the remaining org-name and copyright literals, after which this guard has
-nothing left to protect and is drift (core, burrow-cli and every channel
+Burrow release task E (01a14ba0) retired the copyright literal (LICENSE now
+says Burrow). Delete this file once the remaining org-name literals are gone
+from the history it scans, after which this guard has nothing left to protect
+and is drift (core, burrow-cli and every channel
 plugin carry their own copy). The owner-marker spoof test in
 tests/test_trusted_principals.py is PERMANENT and is NOT deleted with this.
 
@@ -42,11 +43,6 @@ FORBIDDEN = [
 ]
 
 ALLOWLIST = [
-    {
-        "path": "LICENSE",
-        "substring": "Copyright (c) 2026 \u0053tartup \u0053uite",
-        "reason": "copyright owner; changes only with Burrow release task E",
-    },
     {
         "path": "CHANGELOG.md",
         "substring": "`[\u0053uite message from your owner ...]`",

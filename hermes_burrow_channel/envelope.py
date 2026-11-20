@@ -19,8 +19,8 @@ body is neutralised so it cannot even spell one:
 
 (a) ``<burrow-untrusted`` / ``</burrow-untrusted`` (any case, any whitespace
     between ``<``, ``/`` and the name) have their ``<`` replaced by ``&lt;``,
-    and so do the same shapes of every name in ``LEGACY_TAGS`` (the tag was
-    ``suite-untrusted`` before v0.5.0). A continuing Hermes session still
+    and so do the same shapes of every name in ``LEGACY_TAGS`` (the legacy
+    tag ``suite-untrusted``, emitted before v0.5.0). A continuing Hermes session still
     holds earlier turns wrapped in the old tag, and its stored system prompt
     may still name it, so a forged old-style marker must stay as inert as a
     forged new one;
@@ -53,7 +53,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 TAG = "burrow-untrusted"
-# Names the envelope had before. Never emitted; neutralised exactly like TAG.
+# Legacy names the envelope had before v0.5.0. Never emitted; neutralised
+# exactly like TAG.
 LEGACY_TAGS: tuple[str, ...] = ("suite-untrusted",)
 SOURCE = "burrow"
 

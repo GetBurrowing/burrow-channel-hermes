@@ -180,8 +180,9 @@ class AttachmentTooLarge(BurrowError):
 
 
 class InvalidBurrowURL(BurrowError):
-    """BURROW_URL (or SUITE_URL) cannot be dialled as a websocket URI. Terminal: retrying the
-    same URL cannot succeed, so the supervisor stops instead of looping."""
+    """BURROW_URL (or the legacy SUITE_URL) cannot be dialled as a websocket URI.
+    Terminal: retrying the same URL cannot succeed, so the supervisor stops
+    instead of looping."""
 
 
 class _SessionEnded(Exception):

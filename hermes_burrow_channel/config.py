@@ -9,8 +9,8 @@ change. Defaults equal burrow-channel-claude-code src/suite-client.ts
 sibling has none.
 
 Every env name has two spellings: ``BURROW_<X>``, read first, and the
-deprecated ``SUITE_<X>``, read when the new one is unset or blank. Using the
-old one logs one deprecation warning per name per process. ``ENV_FALLBACKS``
+legacy ``SUITE_<X>`` (deprecated), read when the new one is unset or blank.
+Using the legacy one logs one deprecation warning per name per process. ``ENV_FALLBACKS``
 is the whole list; every reader goes through ``resolve_env``.
 """
 
@@ -29,7 +29,7 @@ from .redact import RedactingLogger
 
 _log = RedactingLogger(logging.getLogger(__name__))
 
-# (new name, deprecated name). A RAW literal on purpose: tests/test_config.py
+# (new name, legacy deprecated name). A RAW literal on purpose: tests/test_config.py
 # pins it against a second literal, so dropping a pair fails a test instead of
 # silently stranding the hosts that still set the old name.
 ENV_FALLBACKS: tuple[tuple[str, str], ...] = (
@@ -208,8 +208,9 @@ def resolve_token(
     env: Mapping[str, str], default_token_file: str | os.PathLike | None = None
 ) -> str:
     """The runtime token, from (in order) the file named by
-    BURROW_RUNTIME_TOKEN_FILE (or SUITE_RUNTIME_TOKEN_FILE), ``default_token_file``
-    when it exists, or the legacy BURROW_RUNTIME_TOKEN (or SUITE_RUNTIME_TOKEN)
+    BURROW_RUNTIME_TOKEN_FILE (or the legacy SUITE_RUNTIME_TOKEN_FILE),
+    ``default_token_file`` when it exists, or the legacy BURROW_RUNTIME_TOKEN
+    (or SUITE_RUNTIME_TOKEN)
     variable. "" when none is set.
 
     The file forms keep the token out of every process environment. The

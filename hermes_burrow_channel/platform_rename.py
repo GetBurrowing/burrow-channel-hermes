@@ -1,6 +1,7 @@
-"""Move a Hermes home's session state from the pre-v0.5.0 platform key to ``burrow``.
+"""Move a Hermes home's session state from the legacy platform key to ``burrow``.
 
-Until v0.5.0 the plugin registered the gateway platform ``startup_suite``.
+Until v0.5.0 the plugin registered the gateway platform under the legacy key
+``startup_suite``.
 Hermes bakes that key into durable state, so a plain rename of
 ``adapter.PLATFORM_NAME`` would orphan every existing chat: the routing index
 row for ``agent:<ns>:startup_suite:<chat_type>:<chat_id>[...]`` is never looked
@@ -64,11 +65,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# The legacy platform key. Only read, to move state off it; never registered.
 OLD_PLATFORM = "startup_suite"
 # Equal to adapter.PLATFORM_NAME (pinned by tests/test_platform_rename.py; not
 # imported, so this module runs without loading the adapter).
 NEW_PLATFORM = "burrow"
-# Chat ids the adapter itself minted under the old names. Only the adapter's
+# Chat ids the adapter itself minted under the legacy names. Only the adapter's
 # own sentinel; a Burrow space id is a UUID and never changes.
 CHAT_ID_RENAMES: dict[str, str] = {"suite:no-space": "burrow:no-space"}
 

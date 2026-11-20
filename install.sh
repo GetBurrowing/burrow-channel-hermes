@@ -22,7 +22,7 @@
 #     and media delivery refuse to read.
 #   - $HERMES_HOME/.env: BURROW_URL, BURROW_RUNTIME_ID, BURROW_RUNTIME_TOKEN_FILE
 #     (the path above; plus BURROW_ALLOW_ALL_USERS / BURROW_ALLOWED_USERS when
-#     asked), each ALSO written under its deprecated SUITE_ name so a
+#     asked), each ALSO written under its legacy SUITE_ name so a
 #     downgrade to v0.2.0 still connects; mode 0600. A BURROW_RUNTIME_TOKEN or
 #     SUITE_RUNTIME_TOKEN line from an older install is removed.
 #   - the plugin `burrow-platform`, installed and enabled through
@@ -31,7 +31,8 @@
 #     plugin's hermes_burrow_channel/mcp_bridge.py, which relays to
 #     https://<host>/mcp and reads the token from the file itself, so neither
 #     config.yaml nor any environment holds it;
-#   - $HERMES_HOME/.suite-channel/: the install record uninstall.sh uses to
+#   - $HERMES_HOME/.suite-channel/ (a legacy name, kept so uninstall.sh finds
+#     records older installs wrote): the install record uninstall.sh uses to
 #     give config.yaml back byte for byte (a 0600 copy of config.yaml as it
 #     was before the first install, and which directories this created).
 #
@@ -45,7 +46,7 @@ readonly MCP_NAME="burrow"
 readonly TOKEN_RELPATH="mcp-tokens/burrow-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
 # Clone source when not run from a checkout. Precedence: --repo, then the
-# HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
+# HERMES_BURROW_CHANNEL_REPO environment variable, then the legacy
 # HERMES_SUITE_CHANNEL_REPO, then this default.
 readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/GetBurrowing/burrow-channel-hermes.git}}"
 readonly RESULT_LINE="burrow-channel-hermes: installed"
@@ -56,7 +57,7 @@ die() {
   exit 1
 }
 
-# One stderr line when only the deprecated repo override is set.
+# One stderr line when only the legacy repo override is set.
 warn_deprecated_repo_env() {
   if [ -z "${HERMES_BURROW_CHANNEL_REPO:-}" ] && [ -n "${HERMES_SUITE_CHANNEL_REPO:-}" ]; then
     log "HERMES_SUITE_CHANNEL_REPO is deprecated; set HERMES_BURROW_CHANNEL_REPO (the old name still works)"
@@ -246,7 +247,7 @@ env_set() {
   [ "$changed" = 0 ] || write_env "$out"
 }
 
-# BURROW_<SUFFIX> and SUITE_<SUFFIX> to the same value.
+# BURROW_<SUFFIX> and the legacy SUITE_<SUFFIX> to the same value.
 env_set_both() {
   env_set "BURROW_$1" "$2"
   env_set "SUITE_$1" "$2"
@@ -707,8 +708,8 @@ main() {
 
   # The env keys go in first: `hermes plugins install` prompts for any
   # requires_env variable that is still unset (v0.2.0's plugin.yaml lists
-  # the SUITE_ names). Every key is written under BOTH names: the plugin reads
-  # BURROW_ first, and v0.2.0 reads only SUITE_, so a downgrade still works.
+  # the legacy SUITE_ names). Every key is written under BOTH names: the
+  # plugin reads BURROW_ first, and v0.2.0 reads only the legacy SUITE_, so a downgrade still works.
   env_set_both URL "$URL_ARG"
   env_set_both RUNTIME_ID "$RUNTIME_ID_ARG"
   env_set_both RUNTIME_TOKEN_FILE "$TOKEN_PATH"

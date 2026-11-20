@@ -86,22 +86,23 @@ logger = logging.getLogger(__name__)
 
 # The gateway platform key. Hermes keys sessions, `platform_toolsets.<key>`,
 # `platforms.<key>` and the model-visible "Source:"/"Platform:" lines on it
-# (title-cased: "Burrow"). v0.5.0 renamed it from `startup_suite`; an existing
-# home's state keyed on the old one is moved by ``platform_rename`` (see
-# README "Platform rename"), never by this module.
+# (title-cased: "Burrow"). v0.5.0 renamed it from the legacy key
+# `startup_suite`; an existing home's state keyed on the legacy key is moved by
+# ``platform_rename`` (see README "Platform rename"), never by this module.
 PLATFORM_NAME = "burrow"
 LABEL = "Burrow"
 CHUNK_PREFIX = "chunk:"
 # chat_id for a dispatch that names no space at all (cron sweeps, webhooks).
-# Sends to it are refused with an error, never guessed at. Was
-# "suite:no-space" before v0.5.0 (``platform_rename.CHAT_ID_RENAMES``).
+# Sends to it are refused with an error, never guessed at. The legacy id
+# "suite:no-space" was used before v0.5.0 (``platform_rename.CHAT_ID_RENAMES``).
 NO_SPACE_CHAT = "burrow:no-space"
 # user_id for a system_event (no message, so no author). A real principal so
 # BURROW_ALLOWED_USERS can name it; Hermes default-denies a missing user_id.
-# DELIBERATELY still "suite-system": operators list it by name in
-# BURROW_ALLOWED_USERS / --allowed-users, so renaming it would silently deny
-# every task dispatch on such a host. The model never sees it (user_name is
-# LABEL for a system_event).
+# DELIBERATELY still the legacy id "suite-system": operators list it by name
+# in BURROW_ALLOWED_USERS / --allowed-users, so renaming it would silently deny
+# every task dispatch on such a host. Renaming it is a cross-system change
+# (every host's allowlist), not one this plugin can make alone. The model
+# never sees it (user_name is LABEL for a system_event).
 SYSTEM_USER = "suite-system"
 # How long connect() waits for the first join (the client keeps retrying
 # with backoff underneath). Same budget as the IRC adapter's registration wait.
@@ -143,8 +144,9 @@ class _ScopedEnv:
         return get_scoped_secret(name, default)
 
 
-# The legacy BURROW_RUNTIME_TOKEN / SUITE_RUNTIME_TOKEN value, moved out of os.environ by
-# _take_env_token(). Held here (and in the adapter's BurrowConfig) only.
+# The legacy BURROW_RUNTIME_TOKEN / SUITE_RUNTIME_TOKEN value (both legacy
+# names), moved out of os.environ by _take_env_token(). Held here (and in the
+# adapter's BurrowConfig) only.
 _ENV_TOKEN: str | None = None
 
 
@@ -702,7 +704,7 @@ def register(ctx):
     Hermes takes single env NAMES for the allowlist, allow-all and cron
     home-channel gates and reads them itself, live, on every message. So the
     name passed here is the spelling this host sets, resolved now: BURROW_X
-    when set, else SUITE_X, else BURROW_X. A host that renames a variable
+    when set, else the legacy SUITE_X, else BURROW_X. A host that renames a variable
     restarts the gateway, as for any plugin setting. Under multiplexing the
     launch profile's spelling is the one registered; see README."""
     _take_env_token()

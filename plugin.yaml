@@ -12,8 +12,8 @@ author: Burrow
 # update.sh runs) prompts for every requires_env name unset in
 # $HERMES_HOME/.env (hermes_cli/plugins_cmd.py _missing_env_specs), and it
 # takes one spelling per entry. Listing BURROW_URL would prompt every host
-# still on the SUITE_ names; listing SUITE_URL would tell a new host to set the
-# deprecated name. install.sh writes BURROW_URL, BURROW_RUNTIME_ID and
+# still on the legacy SUITE_ names; listing SUITE_URL would tell a new host to
+# set the legacy name. install.sh writes BURROW_URL, BURROW_RUNTIME_ID and
 # BURROW_RUNTIME_TOKEN_FILE (and their SUITE_ twins) before it installs, and
 # the plugin declares the spellings a host sets to the gateway at load
 # (register() required_env). Both spellings stay listed below, so

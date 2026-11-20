@@ -36,13 +36,13 @@ once).
 ```sh
 # From a checkout (the token on stdin; it is never accepted on argv):
 printf '%s' "$BURROW_TOKEN" | ./install.sh \
-  --url wss://suite.example.com/runtime/ws --runtime-id my-runtime --allow-all-users
+  --url wss://burrow.example.com/runtime/ws --runtime-id my-runtime --allow-all-users
 
 # One command, no checkout (stdin is the script here, so the token comes from
 # --token-file, else a no-echo prompt on the terminal):
 curl -fsSL <raw url>/install.sh | bash -s -- \
-  --url wss://suite.example.com/runtime/ws --runtime-id my-runtime \
-  --token-file ~/.suite-token [--hermes-home DIR]
+  --url wss://burrow.example.com/runtime/ws --runtime-id my-runtime \
+  --token-file ~/.burrow-token [--hermes-home DIR]
 
 hermes gateway restart     # or `hermes gateway run` in the foreground
 ```
@@ -62,7 +62,7 @@ What install.sh changes, and nothing else:
 | `$HERMES_HOME/plugins/burrow-platform` | the plugin, via `hermes plugins install <source> --ref <sha> --no-enable`, then `hermes plugins enable burrow-platform` |
 | `hermes_burrow_channel/_build.py` in that copy | `BUILD = "<installed sha>"` (the build stamp core shows as the runtime's build) |
 | `config.yaml` `mcp_servers.burrow` | via `hermes config set`: a stdio server, `command` + `args` (see Burrow tools). The `url` / `headers` form an older install wrote is unset |
-| `$HERMES_HOME/.suite-channel/` (0700) | the install record, written once by the FIRST install: a 0600 copy of `config.yaml` as it was, and which of `config.yaml`, `.env`, `mcp-tokens/` did not exist yet. uninstall.sh uses it and then deletes it |
+| `$HERMES_HOME/.suite-channel/` (0700; a legacy name, kept so older records are still found) | the install record, written once by the FIRST install: a 0600 copy of `config.yaml` as it was, and which of `config.yaml`, `.env`, `mcp-tokens/` did not exist yet. uninstall.sh uses it and then deletes it |
 
 `$HERMES_HOME` defaults to `$HERMES_HOME`, else `~/.hermes`. `.env` is Hermes's
 secret store (`hermes_cli/config.py` `get_env_path`); install.sh writes the
@@ -132,7 +132,7 @@ against the real CLI (fdec926e): the second install prints no `Set` line and
 leaves `config.yaml`, `.env` and the token file byte-identical. The last line printed on success is exactly
 `burrow-channel-hermes: installed`; uninstall.sh and update.sh end with
 `burrow-channel-hermes: uninstalled` and `burrow-channel-hermes: updated`
-(`hermes-suite-channel: ...` before v0.5.0). burrow-cli keys on the install
+(the legacy `hermes-suite-channel: ...` before v0.5.0). burrow-cli keys on the install
 line.
 
 Set `BURROW_HOME_CHANNEL` (a Burrow space id) if you want cron output
@@ -152,7 +152,7 @@ deleted), the config.yaml bookkeeping below, the token file (and
 `mcp-tokens/` if the install created it and it is empty), the install
 record, and the `.env` lines defining `BURROW_URL`, `BURROW_RUNTIME_ID`,
 `BURROW_RUNTIME_TOKEN_FILE`, `BURROW_RUNTIME_TOKEN`, `BURROW_ALLOW_ALL_USERS` and
-`BURROW_ALLOWED_USERS`, and the same six under their `SUITE_` names. Other `.env` lines are kept byte for byte, and a `.env`
+`BURROW_ALLOWED_USERS`, and the same six under their legacy `SUITE_` names. Other `.env` lines are kept byte for byte, and a `.env`
 the install created is deleted when nothing else is left in it.
 
 **config.yaml.** Hermes's own writer adds keys nobody asked it to: `hermes
@@ -204,7 +204,7 @@ token out of `.env`; re-run install.sh for that.
 
 ### Platform rename (v0.5.0)
 
-v0.5.0 registers the gateway platform as `burrow` (was `startup_suite`), so
+v0.5.0 registers the gateway platform as `burrow` (the legacy key was `startup_suite`), so
 the model reads `Source: Burrow`, `Platform: burrow` and "No home channel is
 set for Burrow" instead of the old name. Hermes keys durable state on that
 name, and a home that held state under the old one must be MOVED with the
@@ -255,7 +255,7 @@ verbatim). Its `Platform:` line still says `startup_suite`, so on the first
 turn after the move Hermes adds its own one-shot surface-switch note naming
 `burrow` and carrying the new platform hint (agent/surface_switch.py); the
 prompt itself converges at the next compression. Earlier turns keep the old
-`<suite-untrusted>` tag, which the envelope still neutralises. `/new` gives a
+legacy `<suite-untrusted>` tag, which the envelope still neutralises. `/new` gives a
 clean prompt.
 
 ## Burrow tools (MCP)
@@ -272,7 +272,7 @@ mcp_servers:
     args:
       - $HERMES_HOME/plugins/burrow-platform/hermes_burrow_channel/mcp_bridge.py
       - --url
-      - https://suite.example.com/mcp          # derived from --url; --mcp-url overrides
+      - https://burrow.example.com/mcp         # derived from --url; --mcp-url overrides
       - --token-file
       - $HERMES_HOME/mcp-tokens/burrow-platform.runtime-token
 ```
@@ -325,16 +325,16 @@ through it. Since v0.4.0 the server is named `burrow`.
 
 ## Settings
 
-### Env names: `BURROW_*` first, `SUITE_*` deprecated
+### Env names: `BURROW_*` first, legacy `SUITE_*` deprecated
 
 Every setting below is read as `BURROW_<X>` first and, when that is unset or
-blank, as the deprecated `SUITE_<X>`; the first use of an old name logs one
+blank, as the legacy, deprecated `SUITE_<X>`; the first use of an old name logs one
 warning per name per process (`Burrow: SUITE_URL is deprecated; set
 BURROW_URL`). A host installed by v0.2.0, whose `.env` holds only `SUITE_`
 names, keeps working after `update.sh` with no edit. The full list is
 `ENV_FALLBACKS` in `hermes_burrow_channel/config.py` (pinned by a test); the
 installer's repository override follows the same rule
-(`HERMES_BURROW_CHANNEL_REPO`, then `HERMES_SUITE_CHANNEL_REPO`).
+(`HERMES_BURROW_CHANNEL_REPO`, then the legacy `HERMES_SUITE_CHANNEL_REPO`).
 
 Hermes reads three of them itself, by ONE name the plugin registers at load:
 the allowlist (`*_ALLOWED_USERS`), allow-all (`*_ALLOW_ALL_USERS`) and the cron
@@ -403,7 +403,7 @@ An `attention` event becomes one Hermes `MessageEvent`:
 | MessageEvent | from |
 | --- | --- |
 | `source.chat_id` | `signal.space_id`, else `signal.metadata.space_id` (a system_event names its space only there; reply target only) |
-| `user_id` | `message.author_id`, else `message.author`; `suite-system` for a system_event |
+| `user_id` | `message.author_id`, else `message.author`; `suite-system` (a legacy id, kept: hosts allow-list it) for a system_event |
 | `user_name` | `message.author` |
 | `message_id` | `signal.message_id` |
 | `raw_message` | the payload |
@@ -481,7 +481,7 @@ sits on top of the client's 1 s identity window, for dead-letter replays.
 Neither sibling wraps content in plugin code, so this is new. Inside the
 body: `<burrow-untrusted` / `</burrow-untrusted` (any case or spacing) become
 `&lt;...`, so a forged end marker closes nothing, and so do the same shapes of
-the pre-v0.5.0 tag `suite-untrusted` (`LEGACY_TAGS`): a continuing session
+the legacy pre-v0.5.0 tag `suite-untrusted` (`LEGACY_TAGS`): a continuing session
 still holds earlier turns in the old tag, so a forged old-style marker must
 be as inert as a new one; chat special tokens `<|...|>`
 (and DeepSeek's fullwidth `<\uff5c...\uff5c>`) become `<\|...\|>`; an at-sign
