@@ -42,11 +42,12 @@ migration (``RouteCollision``) having changed nothing, as
 ONLY WITH THE GATEWAY STOPPED. A running gateway holds the routing index in
 memory and writes it back over any change made here (the reason Hermes's own
 ``rekey_profile_routing`` rekeys the live store instead). ``migrate_home``
-asks Hermes (``gateway.status.is_gateway_running``, scoped to this home's
-``gateway.pid``) and refuses with ``GatewayRunning`` when one is up and there
-is anything to move. burrow-cli runs this on ``burrow hermes``'s start path,
-which already refuses to rename under a live session; see README "Platform
-rename" for running it by hand.
+checks this home's ``gateway.lock`` and ``gateway_state.json``
+(``gateway_running``, a read-only equivalent of Hermes's removed
+``gateway.status.is_gateway_running``) and refuses with ``GatewayRunning``
+when one is up and there is anything to move. burrow-cli runs this on
+``burrow hermes``'s start path, which already refuses to rename under a live
+session; see README "Platform rename" for running it by hand.
 
 Idempotent: a second run finds nothing to move and reports zeros.
 
@@ -413,12 +414,150 @@ def plan_cron_jobs(path: Path) -> tuple[Any, int]:
 # ── the home ──────────────────────────────────────────────────────────────
 
 
-def gateway_running(home: Path) -> bool:
-    """Hermes's own answer, scoped to this home's identity files, and never
-    unlinking them (``cleanup_stale=False``)."""
-    from gateway.status import is_gateway_running
+# A gateway's identity files in its home (gateway/status.py at fdec926e). Each
+# of gateway.pid and gateway.lock holds one JSON record ``{"pid", "kind",
+# "argv", "start_time", "hermes_home"}``; gateway_state.json holds the same
+# fields plus ``gateway_state`` ("starting", "running", ..., "stopped").
+GATEWAY_LOCK = "gateway.lock"
+GATEWAY_STATE = "gateway_state.json"
+# gateway_state values Hermes reads as "not running" for a live PID
+# (get_runtime_status_running_pid).
+_NOT_RUNNING_STATES = frozenset({None, "stopped", "startup_failed"})
 
-    return bool(is_gateway_running(home / "gateway.pid", cleanup_stale=False))
+
+def _read_record(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    if isinstance(payload, int) and not isinstance(payload, bool):
+        return {"pid": payload}  # a legacy bare-integer PID file
+    return payload if isinstance(payload, dict) else None
+
+
+def _start_time(pid: int) -> int | None:
+    """Hermes's PID-reuse fingerprint: /proc start ticks, else psutil
+    centiseconds (gateway/status.py ``_get_process_start_time``)."""
+    try:
+        return int(Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[21])
+    except (OSError, IndexError, ValueError):
+        pass
+    try:
+        import psutil
+
+        return int(round(psutil.Process(pid).create_time() * 100))
+    except Exception:
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+    if psutil is not None:
+        try:
+            return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+        except Exception:
+            return psutil.pid_exists(pid)
+    if sys.platform == "win32":
+        return True  # os.kill(pid, 0) signals a console group there; assume alive
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _record_live(record: dict[str, Any] | None, home: Path) -> bool:
+    """The record names a live PID that passes Hermes's reuse guard (start
+    times differ only when both are known) and does not name another home."""
+    if not isinstance(record, dict):
+        return False
+    try:
+        pid = int(record["pid"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    # This process is the migration, not a gateway: Hermes's SessionDB and
+    # SessionStore stamp gateway_state.json with the PID of whoever opened them
+    # ("starting"). A gateway in THIS process still holds gateway.lock, which
+    # _lock_held sees (a fresh open is its own lock description).
+    if pid <= 0 or pid == os.getpid() or not _pid_alive(pid):
+        return False
+    recorded = record.get("start_time")
+    current = _start_time(pid)
+    if recorded is not None and current is not None and recorded != current:
+        return False
+    other = record.get("hermes_home")
+    if other:
+        try:
+            if Path(other).resolve() != home.resolve():
+                return False
+        except (OSError, TypeError, ValueError):
+            pass
+    return True
+
+
+def _lock_held(lock: Path, home: Path) -> bool:
+    """True when another process holds ``gateway.lock``. A gateway holds an
+    exclusive flock on it for its whole life and the OS drops it when the
+    process dies, so a stale file is never "held". Opened read-only: probing
+    never creates, truncates or unlinks it."""
+    try:
+        import fcntl
+    except ImportError:  # Windows: no flock to probe; trust the lock's record
+        return _record_live(_read_record(lock), home)
+    try:
+        fd = os.open(lock, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def gateway_running(home: Path) -> bool:
+    """True when a Hermes gateway is up for ``home``.
+
+    A vendored stand-in for ``gateway.status.is_gateway_running(home /
+    "gateway.pid", cleanup_stale=False)``, which Hermes deleted in its
+    September 2026 decomposition: from 2026-09-14 its loader refuses the WHOLE
+    plugin while any module imports that path (tests/test_hermes_compat.py).
+    It reads only this home's files and never unlinks, creates or rewrites
+    one, stale or not (Hermes's own probe deletes a stale pid file and an
+    unreadable lock).
+
+    Running when either holds:
+
+    * a process holds ``gateway.lock`` (what Hermes checks first);
+    * ``gateway_state.json`` names a live gateway PID in a running state, for
+      a launch-service gateway whose ``gateway.pid`` was unlinked (Hermes's
+      ``live_gateway_pid_for_home`` falls back to it the same way).
+
+    It errs towards "running": that refuses a migration, which can be retried
+    with the gateway stopped, where a wrong "stopped" lets the live gateway
+    write the old keys back over it."""
+    home = Path(home)
+    if _lock_held(home / GATEWAY_LOCK, home):
+        return True
+    state = _read_record(home / GATEWAY_STATE)
+    return (
+        isinstance(state, dict)
+        and state.get("gateway_state") not in _NOT_RUNNING_STATES
+        and _record_live(state, home)
+    )
 
 
 def migrate_home(home: str | os.PathLike, *, dry_run: bool = False) -> dict[str, Any]:

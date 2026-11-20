@@ -225,8 +225,9 @@ as an unknown platform, and deletes them at its next whole-index save.
 `platform_rename.py` rewrites state.db in ONE transaction, with the same
 shape-level SQL Hermes's own `rekey_profile_state` uses for a profile rename;
 it refuses (exit 2, nothing changed) when a gateway is running for the home
-(`gateway.status.is_gateway_running`, scoped to the home) or a renamed key
-already exists. It is idempotent. `tests/test_platform_rename.py` builds the
+(a held `gateway.lock`, or a live gateway named in `gateway_state.json`:
+`gateway_running`, a read-only copy of the check Hermes's removed
+`gateway.status.is_gateway_running` made) or a renamed key already exists. It is idempotent. `tests/test_platform_rename.py` builds the
 old state with Hermes's real `SessionStore`, moves it, and checks a fresh
 store resolves each chat under `burrow` to the SAME session; its control shows
 the same lookup without the move starting a fresh session.

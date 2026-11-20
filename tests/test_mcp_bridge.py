@@ -134,7 +134,7 @@ def test_every_request_carries_the_burrow_user_agent(token_file):
     assert proc.returncode == 0, proc.stderr
     assert len(fake.seen) == 3
     assert [s["headers"].get("user-agent") for s in fake.seen] == [
-        "burrow-channel-hermes/0.5.0"
+        "burrow-channel-hermes/0.5.1"
     ] * 3
 
 
