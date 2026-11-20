@@ -2,7 +2,7 @@
 
 Delete this file once Burrow release task E (01a14ba0) finishes: E retires
 the remaining org-name and copyright literals, after which this guard has
-nothing left to protect and is drift (core, suite-cli and every channel
+nothing left to protect and is drift (core, burrow-cli and every channel
 plugin carry their own copy). The owner-marker spoof test in
 tests/test_trusted_principals.py is PERMANENT and is NOT deleted with this.
 

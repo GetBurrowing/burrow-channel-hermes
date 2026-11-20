@@ -12,8 +12,8 @@ import logging
 import pytest
 from conftest import make_config
 
-from hermes_suite_channel.redact import REDACTED, RedactingLogger, redact
-from hermes_suite_channel.suite_client import InvalidSuiteURL, PushTimeout, SuiteClient
+from hermes_burrow_channel.burrow_client import BurrowClient, InvalidBurrowURL, PushTimeout
+from hermes_burrow_channel.redact import REDACTED, RedactingLogger, redact
 
 SENTINEL = "tok-SENTINEL-01a0d6c5"
 
@@ -47,7 +47,7 @@ async def test_sentinel_token_never_reaches_a_log_record(server, caplog):
     server.refuse_joins = 1  # join-failure path
     server.replies["reply"] = None  # push-timeout path
 
-    client = SuiteClient(make_config(server.url, token=SENTINEL, push_timeout_ms=100))
+    client = BurrowClient(make_config(server.url, token=SENTINEL, push_timeout_ms=100))
     await client.start()
     try:
         await client.wait_joined(5)  # after two reconnects
@@ -84,7 +84,7 @@ async def test_malformed_url_error_carries_no_token(caplog):
     from websockets.asyncio.client import connect
     from websockets.exceptions import InvalidURI
 
-    from hermes_suite_channel.suite_client import socket_url
+    from hermes_burrow_channel.burrow_client import socket_url
 
     caplog.set_level(logging.DEBUG)
     cfg = make_config("ftp://suite.example/runtime/ws", token=SENTINEL)
@@ -93,17 +93,17 @@ async def test_malformed_url_error_carries_no_token(caplog):
         await connect(socket_url(cfg))
     assert SENTINEL in str(raw.value)
 
-    client = SuiteClient(cfg)
-    with pytest.raises(InvalidSuiteURL) as info:
+    client = BurrowClient(cfg)
+    with pytest.raises(InvalidBurrowURL) as info:
         await client._session()
     assert SENTINEL not in str(info.value)
     assert info.value.__context__ is None and info.value.__cause__ is None
 
     fatal = []
-    client = SuiteClient(cfg, on_fatal=fatal.append)
+    client = BurrowClient(cfg, on_fatal=fatal.append)
     await client.start()
     await asyncio.wait_for(client._task, 2)  # terminal: the supervisor stops
-    assert isinstance(client.fatal_error, InvalidSuiteURL) and fatal == [client.fatal_error]
+    assert isinstance(client.fatal_error, InvalidBurrowURL) and fatal == [client.fatal_error]
     assert client.sessions == 0
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "not reconnecting" in text

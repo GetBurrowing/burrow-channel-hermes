@@ -25,7 +25,7 @@ Correlation ids are read from the signal ROOT ONLY. Because core dual-writes
 them, that is behaviour-preserving against every payload core sends today.
 The one metadata read is the REPLY TARGET: a system_event names its space in
 ``metadata.space_id`` alone, so ``reply_space_id`` falls back to it, as
-claude-code-suite-channel does ("replying into a metadata-named space is
+burrow-channel-claude-code does ("replying into a metadata-named space is
 safe"). The header's ``space_id`` is the root value only.
 """
 

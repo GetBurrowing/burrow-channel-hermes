@@ -1,4 +1,4 @@
-"""hermes_suite_channel/mcp_bridge.py as Hermes runs it: a subprocess speaking
+"""hermes_burrow_channel/mcp_bridge.py as Hermes runs it: a subprocess speaking
 MCP stdio, relaying to an HTTP endpoint shaped like Burrow's
 (platform_web/controllers/mcp_controller.ex: JSON replies, 204 for a
 notification, no session)."""
@@ -14,15 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from hermes_suite_channel import __version__
-from hermes_suite_channel.mcp_bridge import USER_AGENT, parse_sse
+from hermes_burrow_channel import __version__
+from hermes_burrow_channel.mcp_bridge import USER_AGENT, parse_sse
 
 ROOT = Path(__file__).resolve().parent.parent
-BRIDGE = ROOT / "hermes_suite_channel" / "mcp_bridge.py"
+BRIDGE = ROOT / "hermes_burrow_channel" / "mcp_bridge.py"
 TOKEN = "tok-bridge-SENTINEL-01a0d6c5"
 
 
-class FakeSuiteMCP:
+class FakeBurrowMCP:
     def __init__(self, token: str, sse: bool = False):
         self.token = token
         self.sse = sse
@@ -102,7 +102,7 @@ LIST = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
 
 @pytest.mark.parametrize("sse", [False, True])
 def test_relays_requests_and_carries_the_token_only_in_the_header(token_file, sse):
-    fake = FakeSuiteMCP(TOKEN, sse=sse)
+    fake = FakeBurrowMCP(TOKEN, sse=sse)
     try:
         proc, replies = run_bridge(fake.url, token_file, [INIT, INITIALIZED, LIST])
     finally:
@@ -126,7 +126,7 @@ def test_relays_requests_and_carries_the_token_only_in_the_header(token_file, ss
 def test_every_request_carries_the_burrow_user_agent(token_file):
     """Cloudflare in front of some Burrow hosts answers urllib's default
     Python-urllib/3.x with 403 error code 1010, so the bridge names itself."""
-    fake = FakeSuiteMCP(TOKEN)
+    fake = FakeBurrowMCP(TOKEN)
     try:
         proc, replies = run_bridge(fake.url, token_file, [INIT, INITIALIZED, LIST])
     finally:
@@ -134,7 +134,7 @@ def test_every_request_carries_the_burrow_user_agent(token_file):
     assert proc.returncode == 0, proc.stderr
     assert len(fake.seen) == 3
     assert [s["headers"].get("user-agent") for s in fake.seen] == [
-        "burrow-channel-hermes/0.4.1"
+        "burrow-channel-hermes/0.5.0"
     ] * 3
 
 
@@ -154,7 +154,7 @@ def test_version_strings_match_pyproject():
 
 
 def test_a_refused_token_is_an_error_reply_that_does_not_carry_it(token_file):
-    fake = FakeSuiteMCP("some-other-token")
+    fake = FakeBurrowMCP("some-other-token")
     try:
         proc, replies = run_bridge(fake.url, token_file, [INIT])
     finally:
@@ -182,7 +182,7 @@ def test_the_bridge_environment_never_holds_the_token(token_file, tmp_path):
     """Hermes spawns a stdio server with a filtered env (_build_safe_env);
     the bridge reads the file, so its /proc/<pid>/environ has no token. The
     positive control is a canary the test DID put in the env."""
-    fake = FakeSuiteMCP(TOKEN)
+    fake = FakeBurrowMCP(TOKEN)
     env = {"PATH": os.environ["PATH"], "CANARY_01A0D6C5": "canary-value-01a0d6c5"}
     proc = subprocess.Popen(
         [sys.executable, str(BRIDGE), "--url", fake.url, "--token-file", str(token_file)],

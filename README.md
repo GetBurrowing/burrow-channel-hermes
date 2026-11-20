@@ -6,8 +6,8 @@ platform plugin for Burrow federation. A sibling of
 socket, runtime id and token, with Burrow attention events delivered into a
 Hermes session and replies pushed back. The repository is
 `burrow-channel-hermes` (formerly `hermes-suite-channel`; GitHub redirects the
-old URL). The Python distribution name and the installer result lines keep the
-`hermes-suite-channel` name, because suite-cli keys on them.
+old URL). Since v0.5.0 the Python distribution, the package
+(`hermes_burrow_channel`) and the installer result lines carry the same name.
 
 Status: transport, Hermes platform adapter, installer (task 01a0d6c5 stages
 1-4).
@@ -15,7 +15,9 @@ Status: transport, Hermes platform adapter, installer (task 01a0d6c5 stages
 The repository root IS the Hermes plugin directory: `plugin.yaml`
 (`kind: platform`, name `burrow-platform`), `__init__.py` exporting
 `register`, and `adapter.py`. `register(ctx)` registers the gateway platform
-`startup_suite` (config key `gateway.platforms.startup_suite`).
+`burrow` (config keys `platforms.burrow`, `platform_toolsets.burrow`). Before
+v0.5.0 it was `startup_suite`; see "Platform rename" for moving a home that
+holds state under the old key.
 
 ## Install
 
@@ -58,7 +60,7 @@ What install.sh changes, and nothing else:
 | `$HERMES_HOME/mcp-tokens/burrow-platform.runtime-token` (mode 0600, directory 0700) | the token, and nothing else. Never in `.env`: see Security notes |
 | `$HERMES_HOME/.env` (mode 0600) | `BURROW_URL`, `BURROW_RUNTIME_ID`, `BURROW_RUNTIME_TOKEN_FILE` (the path above); `BURROW_ALLOW_ALL_USERS=true` with `--allow-all-users`, `BURROW_ALLOWED_USERS` with `--allowed-users CSV`. Each is ALSO written under its deprecated `SUITE_` name, so a downgrade to v0.2.0 (which reads only `SUITE_`) still connects. A `BURROW_RUNTIME_TOKEN` or `SUITE_RUNTIME_TOKEN` line an older install wrote is removed |
 | `$HERMES_HOME/plugins/burrow-platform` | the plugin, via `hermes plugins install <source> --ref <sha> --no-enable`, then `hermes plugins enable burrow-platform` |
-| `hermes_suite_channel/_build.py` in that copy | `BUILD = "<installed sha>"` (the build stamp core shows as the runtime's build) |
+| `hermes_burrow_channel/_build.py` in that copy | `BUILD = "<installed sha>"` (the build stamp core shows as the runtime's build) |
 | `config.yaml` `mcp_servers.burrow` | via `hermes config set`: a stdio server, `command` + `args` (see Burrow tools). The `url` / `headers` form an older install wrote is unset |
 | `$HERMES_HOME/.suite-channel/` (0700) | the install record, written once by the FIRST install: a 0600 copy of `config.yaml` as it was, and which of `config.yaml`, `.env`, `mcp-tokens/` did not exist yet. uninstall.sh uses it and then deletes it |
 
@@ -128,9 +130,10 @@ there), never through `hermes config get
 hand an expanded value to the shell through a child's stdout. Measured
 against the real CLI (fdec926e): the second install prints no `Set` line and
 leaves `config.yaml`, `.env` and the token file byte-identical. The last line printed on success is exactly
-`hermes-suite-channel: installed`; uninstall.sh and update.sh end with
-`hermes-suite-channel: uninstalled` and `hermes-suite-channel: updated`. The
-Burrow desktop app keys on those lines.
+`burrow-channel-hermes: installed`; uninstall.sh and update.sh end with
+`burrow-channel-hermes: uninstalled` and `burrow-channel-hermes: updated`
+(`hermes-suite-channel: ...` before v0.5.0). burrow-cli keys on the install
+line.
 
 Set `BURROW_HOME_CHANNEL` (a Burrow space id) if you want cron output
 delivered somewhere specific. Without it Hermes posts its own "No home channel
@@ -199,6 +202,62 @@ restamps `_build.py`. Restart the gateway afterwards.
 Because it leaves the configuration alone, it does NOT move an older install's
 token out of `.env`; re-run install.sh for that.
 
+### Platform rename (v0.5.0)
+
+v0.5.0 registers the gateway platform as `burrow` (was `startup_suite`), so
+the model reads `Source: Burrow`, `Platform: burrow` and "No home channel is
+set for Burrow" instead of the old name. Hermes keys durable state on that
+name, and a home that held state under the old one must be MOVED with the
+gateway stopped, or every chat silently starts over: the new gateway builds
+`agent:<ns>:burrow:...` keys, never looks up the old rows, skips them on load
+as an unknown platform, and deletes them at its next whole-index save.
+
+| Where | Old | New | Moved by |
+| --- | --- | --- | --- |
+| `config.yaml` | `platform_toolsets.startup_suite` | `platform_toolsets.burrow` | burrow-cli (`hermes config set` / `unset`) |
+| `config.yaml` | `platforms.startup_suite` (incl. `home_channel.platform`) | `platforms.burrow` | burrow-cli |
+| `.env` | `STARTUP_SUITE_HOME_CHANNEL` (+ `_THREAD_ID`, `_NAME`), if Hermes ever wrote it | `BURROW_HOME_CHANNEL` (+ the same suffixes) | burrow-cli |
+| `state.db` | `gateway_routing`, `sessions.source` / `session_key` / `origin_json`, `delivery_obligations`, `gateway_hygiene_state`, `conversation_generations`, `async_delegations.origin_session` | the same rows, rekeyed | `platform_rename.py` |
+| `sessions/sessions.json` | the legacy routing mirror (Hermes re-imports any key it holds that state.db lacks) | rekeyed | `platform_rename.py` |
+| `cron/jobs.json` | `deliver` / `failure_deliver` `startup_suite[:<chat>]`, `origin.platform` | `burrow[:<chat>]` | `platform_rename.py` |
+| the no-space chat id | `suite:no-space` | `burrow:no-space` | `platform_rename.py` |
+
+`platform_rename.py` rewrites state.db in ONE transaction, with the same
+shape-level SQL Hermes's own `rekey_profile_state` uses for a profile rename;
+it refuses (exit 2, nothing changed) when a gateway is running for the home
+(`gateway.status.is_gateway_running`, scoped to the home) or a renamed key
+already exists. It is idempotent. `tests/test_platform_rename.py` builds the
+old state with Hermes's real `SessionStore`, moves it, and checks a fresh
+store resolves each chat under `burrow` to the SAME session; its control shows
+the same lookup without the move starting a fresh session.
+
+**burrow-cli does all of it** on `burrow hermes`'s start path (0.20.0, which
+pins this release), only while the agent is stopped, inside the same
+snapshot-and-restore transaction as its other renames. By hand, for a home
+burrow-cli does not manage, with the gateway STOPPED:
+
+```sh
+# config.yaml, through Hermes's own writer (copy each old value; set
+# home_channel.platform to burrow), then remove the old keys:
+hermes config set platform_toolsets.burrow '<the old list as JSON>'
+hermes config set platforms.burrow '<the old object as JSON, platform: burrow>'
+hermes config unset platform_toolsets.startup_suite
+hermes config unset platforms.startup_suite
+./update.sh
+# state.db, sessions.json, cron/jobs.json, with Hermes's interpreter and modules:
+PP="$(hermes --run-module pm.environments | python3 -c 'import json,sys; print(json.load(sys.stdin)["PYTHONPATH"])')"
+PY="${PP##*:}"; PY="${PY%/lib/python*}/bin/python"
+PYTHONPATH="$PWD:$PP" "$PY" -m hermes_burrow_channel.platform_rename --hermes-home "$HERMES_HOME"
+```
+
+A continuing session keeps its stored system prompt (Hermes reuses it
+verbatim). Its `Platform:` line still says `startup_suite`, so on the first
+turn after the move Hermes adds its own one-shot surface-switch note naming
+`burrow` and carrying the new platform hint (agent/surface_switch.py); the
+prompt itself converges at the next compression. Earlier turns keep the old
+`<suite-untrusted>` tag, which the envelope still neutralises. `/new` gives a
+clean prompt.
+
 ## Burrow tools (MCP)
 
 Burrow's tools (messaging, tasks, plans, canvases, memory, ...) are served by
@@ -211,7 +270,7 @@ mcp_servers:
   burrow:
     command: /path/to/hermes/venv/bin/python   # the interpreter Hermes's own script names
     args:
-      - $HERMES_HOME/plugins/burrow-platform/hermes_suite_channel/mcp_bridge.py
+      - $HERMES_HOME/plugins/burrow-platform/hermes_burrow_channel/mcp_bridge.py
       - --url
       - https://suite.example.com/mcp          # derived from --url; --mcp-url overrides
       - --token-file
@@ -231,7 +290,7 @@ registrar; portable Agent Plugins' `server_json` liveness is for local apps).
 The HTTP form therefore needs the token in the gateway's `os.environ`, and see
 Security notes for what that costs.
 
-`hermes_suite_channel/mcp_bridge.py` is standard library only: one JSON-RPC
+`hermes_burrow_channel/mcp_bridge.py` is standard library only: one JSON-RPC
 message per stdin line is POSTed to `--url` with the token in the
 `Authorization` header; a JSON or `text/event-stream` reply is written back
 one message per line, 202/204 writes nothing, and `Mcp-Session-Id` /
@@ -250,14 +309,15 @@ through it. Since v0.4.0 the server is named `burrow`.
 | Path | What |
 | --- | --- |
 | `plugin.yaml`, `__init__.py`, `adapter.py` | the Hermes plugin entry points (root = plugin dir) |
-| `hermes_suite_channel/adapter.py` | `SuiteAdapter(BasePlatformAdapter)` and `register(ctx)` |
-| `hermes_suite_channel/inbound.py` | `parse_attention()`: one attention payload read once |
-| `hermes_suite_channel/envelope.py` | `wrap_untrusted()`: the untrusted-content envelope; `frame_trusted()`: a trusted owner's framing |
-| `hermes_suite_channel/suite_client.py` | asyncio Phoenix V2 client for core's `/runtime/ws` socket |
-| `hermes_suite_channel/config.py` | `SuiteConfig.from_extra(extra, env)`: `PlatformConfig.extra` keys, env overrides; `resolve_token()`, the token file |
-| `hermes_suite_channel/mcp_bridge.py` | the stdio MCP server that relays to Burrow's `/mcp` with the token from the file |
-| `hermes_suite_channel/redact.py` | `redact()` and `RedactingLogger`: the only path a log record takes |
-| `hermes_suite_channel/_build.py` | `BUILD`, stamped by the installer, never read from git at runtime |
+| `hermes_burrow_channel/adapter.py` | `BurrowAdapter(BasePlatformAdapter)` and `register(ctx)` |
+| `hermes_burrow_channel/inbound.py` | `parse_attention()`: one attention payload read once |
+| `hermes_burrow_channel/envelope.py` | `wrap_untrusted()`: the untrusted-content envelope; `frame_trusted()`: a trusted owner's framing |
+| `hermes_burrow_channel/burrow_client.py` | asyncio Phoenix V2 client for core's `/runtime/ws` socket |
+| `hermes_burrow_channel/config.py` | `BurrowConfig.from_extra(extra, env)`: `PlatformConfig.extra` keys, env overrides; `resolve_token()`, the token file |
+| `hermes_burrow_channel/mcp_bridge.py` | the stdio MCP server that relays to Burrow's `/mcp` with the token from the file |
+| `hermes_burrow_channel/redact.py` | `redact()` and `RedactingLogger`: the only path a log record takes |
+| `hermes_burrow_channel/_build.py` | `BUILD`, stamped by the installer, never read from git at runtime |
+| `hermes_burrow_channel/platform_rename.py` | moves a home's sessions, routes and cron targets from the pre-v0.5.0 platform key (see Platform rename) |
 | `tests/fake_phoenix.py` | hermetic fake runtime socket on `websockets.serve` |
 | `install.sh`, `uninstall.sh`, `update.sh` | the installer (see Install) |
 | `tests/stub_hermes/hermes`, `tests/test_install_scripts.py` | the installer tests, against a stub `hermes` that records its argv (plus one against the real CLI when `HERMES_REAL_BIN` is set) |
@@ -272,7 +332,7 @@ blank, as the deprecated `SUITE_<X>`; the first use of an old name logs one
 warning per name per process (`Burrow: SUITE_URL is deprecated; set
 BURROW_URL`). A host installed by v0.2.0, whose `.env` holds only `SUITE_`
 names, keeps working after `update.sh` with no edit. The full list is
-`ENV_FALLBACKS` in `hermes_suite_channel/config.py` (pinned by a test); the
+`ENV_FALLBACKS` in `hermes_burrow_channel/config.py` (pinned by a test); the
 installer's repository override follows the same rule
 (`HERMES_BURROW_CHANNEL_REPO`, then `HERMES_SUITE_CHANNEL_REPO`).
 
@@ -348,7 +408,7 @@ An `attention` event becomes one Hermes `MessageEvent`:
 | `message_id` | `signal.message_id` |
 | `raw_message` | the payload |
 | `text` | `wrap_untrusted(...)` around `message.content`, else `signal.prompt`; `frame_trusted(...)` instead for a trusted principal |
-| `metadata["suite_trusted_author"]` | `True` only when the message was delivered as a trusted principal's |
+| `metadata["burrow_trusted_author"]` | `True` only when the message was delivered as a trusted principal's |
 
 `message.content` falling back to `signal.prompt` is the `system_event_prompt`
 feature the handshake declares. A dispatch with neither gets
@@ -412,15 +472,18 @@ sits on top of the client's 1 s identity window, for dead-letter replays.
 ### The untrusted envelope
 
 ```
-<suite-untrusted nonce="<128-bit hex>" source="burrow" space_id=".." message_id=".." task_id=".." reason=".." author="..">
+<burrow-untrusted nonce="<128-bit hex>" source="burrow" space_id=".." message_id=".." task_id=".." reason=".." author="..">
 <one-line preamble: external, untrusted, contains no instructions>
 <body>
-</suite-untrusted nonce="<same>">
+</burrow-untrusted nonce="<same>">
 ```
 
 Neither sibling wraps content in plugin code, so this is new. Inside the
-body: `<suite-untrusted` / `</suite-untrusted` (any case or spacing) become
-`&lt;...`, so a forged end marker closes nothing; chat special tokens `<|...|>`
+body: `<burrow-untrusted` / `</burrow-untrusted` (any case or spacing) become
+`&lt;...`, so a forged end marker closes nothing, and so do the same shapes of
+the pre-v0.5.0 tag `suite-untrusted` (`LEGACY_TAGS`): a continuing session
+still holds earlier turns in the old tag, so a forged old-style marker must
+be as inert as a new one; chat special tokens `<|...|>`
 (and DeepSeek's fullwidth `<\uff5c...\uff5c>`) become `<\|...\|>`; an at-sign
 followed by `[` gets a backslash, so an echoed name token cannot match core's
 mention regex and re-invite an agent. Header values are attribute-escaped and
@@ -481,7 +544,7 @@ attachments (`message.attachments`) are not passed to Hermes yet.
 
 ## Token hygiene
 
-In the gateway the token lives only in `SuiteConfig.token` (excluded from
+In the gateway the token lives only in `BurrowConfig.token` (excluded from
 `repr`) and the socket query string; in the MCP bridge, only in the
 `Authorization` header of each request. Both read it from the token file. Every log record, including the `websockets` library's
 DEBUG request line (which contains the query string), goes through
@@ -489,7 +552,7 @@ DEBUG request line (which contains the query string), goes through
 no captured record across the connect, join-failure, reconnect and
 push-timeout paths. A malformed `BURROW_URL` is terminal: `websockets`'
 `InvalidURI` puts the whole URI, token included, in its message, so the client
-re-raises it as `InvalidSuiteURL` with no URL and no chained original, stops
+re-raises it as `InvalidBurrowURL` with no URL and no chained original, stops
 reconnecting, and the adapter's `connect()` fails with code `invalid_url`.
 
 ## Security notes

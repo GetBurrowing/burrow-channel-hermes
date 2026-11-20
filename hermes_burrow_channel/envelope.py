@@ -1,7 +1,7 @@
 """The untrusted-content envelope every inbound Burrow message is wrapped in.
 
-New code with no sibling to mirror. claude-code-suite-channel relies on the
-Claude Code host's ``<channel>`` tag, and openclaw-suite-channel passes the
+New code with no sibling to mirror. burrow-channel-claude-code relies on the
+Claude Code host's ``<channel>`` tag, and burrow-channel-openclaw passes the
 raw body to ``finalizeInboundContext`` (src/inbound.ts). Hermes neutralises
 source METADATA before it reaches the prompt (gateway/session.py
 ``_format_untrusted_prompt_value``), but not the message body, so the body is
@@ -9,16 +9,21 @@ this plugin's job.
 
 Shape (one function, so alternative framings can be compared by swapping it)::
 
-    <suite-untrusted nonce="<128-bit hex>" source="burrow" space_id=".." ...>
+    <burrow-untrusted nonce="<128-bit hex>" source="burrow" space_id=".." ...>
     <one-line preamble>
     <neutralised body>
-    </suite-untrusted nonce="<same hex>">
+    </burrow-untrusted nonce="<same hex>">
 
 The nonce is fresh per event, so a forged end marker cannot guess it, and the
 body is neutralised so it cannot even spell one:
 
-(a) ``<suite-untrusted`` / ``</suite-untrusted`` (any case, any whitespace
-    between ``<``, ``/`` and the name) have their ``<`` replaced by ``&lt;``;
+(a) ``<burrow-untrusted`` / ``</burrow-untrusted`` (any case, any whitespace
+    between ``<``, ``/`` and the name) have their ``<`` replaced by ``&lt;``,
+    and so do the same shapes of every name in ``LEGACY_TAGS`` (the tag was
+    ``suite-untrusted`` before v0.5.0). A continuing Hermes session still
+    holds earlier turns wrapped in the old tag, and its stored system prompt
+    may still name it, so a forged old-style marker must stay as inert as a
+    forged new one;
 (b) chat special-token shapes: every ``<|`` becomes ``<\\|`` and every ``|>``
     becomes ``\\|>`` (``<|im_start|>``, ``<|im_end|>``, ``<|endoftext|>``,
     ...). The fullwidth-bar variant DeepSeek uses (``<\uff5c...\uff5c>``, U+FF5C) gets
@@ -47,7 +52,9 @@ import secrets
 from collections.abc import Callable, Mapping
 from typing import Any
 
-TAG = "suite-untrusted"
+TAG = "burrow-untrusted"
+# Names the envelope had before. Never emitted; neutralised exactly like TAG.
+LEGACY_TAGS: tuple[str, ...] = ("suite-untrusted",)
 SOURCE = "burrow"
 
 PREAMBLE = (
@@ -60,7 +67,10 @@ PREAMBLE = (
 HEADER_KEYS: tuple[str, ...] = ("space_id", "message_id", "task_id", "reason", "author")
 
 # (a) forged open/close markers, tolerant of case and interior whitespace.
-_MARKER = re.compile(r"<(?=\s*/?\s*" + re.escape(TAG) + r")", re.IGNORECASE)
+_MARKER = re.compile(
+    r"<(?=\s*/?\s*(?:" + "|".join(re.escape(t) for t in (TAG, *LEGACY_TAGS)) + r"))",
+    re.IGNORECASE,
+)
 _AT = chr(64)  # the at-sign, spelled out so no mention-shaped literal sits in this file
 
 

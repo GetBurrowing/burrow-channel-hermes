@@ -49,8 +49,8 @@ MAX_WORKERS = 8
 # urllib's default ``Python-urllib/3.x`` with ``403 error code: 1010``. The
 # bridge never imports the plugin package (Hermes runs this file by path), so
 # the version is spelled here and tests/test_mcp_bridge.py pins it to
-# hermes_suite_channel.__version__.
-USER_AGENT = "burrow-channel-hermes/0.4.1"
+# hermes_burrow_channel.__version__.
+USER_AGENT = "burrow-channel-hermes/0.5.0"
 
 
 class BridgeError(Exception):
@@ -175,7 +175,7 @@ class Bridge:
             if is_request:
                 self.error_reply(msg_id, str(exc))
             else:
-                print(f"suite-mcp-bridge: {exc}", file=sys.stderr, flush=True)
+                print(f"burrow-mcp-bridge: {exc}", file=sys.stderr, flush=True)
 
     def run(self, stdin) -> None:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         read_token(args.token_file)  # fail at start, not on the first tool call
     except BridgeError as exc:
-        print(f"suite-mcp-bridge: {exc}", file=sys.stderr)
+        print(f"burrow-mcp-bridge: {exc}", file=sys.stderr)
         return 2
     Bridge(args.url, args.token_file, args.timeout).run(sys.stdin)
     return 0

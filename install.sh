@@ -28,7 +28,7 @@
 #   - the plugin `burrow-platform`, installed and enabled through
 #     `hermes plugins install` + `hermes plugins enable`;
 #   - config.yaml `mcp_servers.burrow`: a stdio server running the
-#     plugin's hermes_suite_channel/mcp_bridge.py, which relays to
+#     plugin's hermes_burrow_channel/mcp_bridge.py, which relays to
 #     https://<host>/mcp and reads the token from the file itself, so neither
 #     config.yaml nor any environment holds it;
 #   - $HERMES_HOME/.suite-channel/: the install record uninstall.sh uses to
@@ -36,7 +36,7 @@
 #     was before the first install, and which directories this created).
 #
 # Idempotent: a second run with the same arguments changes no file.
-# The last line printed on success is exactly `hermes-suite-channel: installed`.
+# The last line printed on success is exactly `burrow-channel-hermes: installed`.
 
 set -euo pipefail
 
@@ -47,12 +47,12 @@ readonly RECORD_RELDIR=".suite-channel"
 # Clone source when not run from a checkout. Precedence: --repo, then the
 # HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
 # HERMES_SUITE_CHANNEL_REPO, then this default.
-readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/burrow-channel-hermes.git}}"
-readonly RESULT_LINE="hermes-suite-channel: installed"
+readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/GetBurrowing/burrow-channel-hermes.git}}"
+readonly RESULT_LINE="burrow-channel-hermes: installed"
 
-log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
+log() { printf 'burrow-channel-hermes: %s\n' "$*" >&2; }
 die() {
-  printf 'hermes-suite-channel: error: %s\n' "$*" >&2
+  printf 'burrow-channel-hermes: error: %s\n' "$*" >&2
   exit 1
 }
 
@@ -326,7 +326,7 @@ hermes_venv_python() {
 
 # The interpreter that reads config.yaml (it needs Hermes's ruamel.yaml) and
 # runs the MCP bridge (standard library only). In order:
-#   1. --python PATH, when given (suite-cli passes the one it resolved);
+#   1. --python PATH, when given (burrow-cli passes the one it resolved);
 #   2. the launcher's shebang, when that is a PYTHON. A shell shebang is a
 #      wrapper, not an interpreter: every launcher hermes-agent fdec926e
 #      installs is `#!/bin/sh`, and taking /bin/sh for python is the failure
@@ -458,15 +458,15 @@ plugin_dir() { printf '%s/plugins/%s' "$HERMES_HOME" "$PLUGIN_NAME"; }
 
 stamped_build() {
   local f
-  f="$(plugin_dir)/hermes_suite_channel/_build.py"
+  f="$(plugin_dir)/hermes_burrow_channel/_build.py"
   [ -f "$f" ] || return 0
   sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$f"
 }
 
 stamp_build() {
   local sha="$1" f tmp
-  f="$(plugin_dir)/hermes_suite_channel/_build.py"
-  [ -f "$f" ] || die "installed plugin has no hermes_suite_channel/_build.py"
+  f="$(plugin_dir)/hermes_burrow_channel/_build.py"
+  [ -f "$f" ] || die "installed plugin has no hermes_burrow_channel/_build.py"
   tmp="$(mktemp "$f.XXXXXX")"
   sed "s/^BUILD = \".*\"\$/BUILD = \"$sha\"/" "$f" >"$tmp"
   grep -q "^BUILD = \"$sha\"\$" "$tmp" || { rm -f "$tmp"; die "could not stamp _build.py"; }
@@ -511,7 +511,7 @@ resolve_source() {
   if script_is_a_file; then
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   fi
-  if [ -n "$here" ] && [ -f "$here/plugin.yaml" ] && [ -d "$here/hermes_suite_channel" ] &&
+  if [ -n "$here" ] && [ -f "$here/plugin.yaml" ] && [ -d "$here/hermes_burrow_channel" ] &&
     git -C "$here" rev-parse --verify -q HEAD >/dev/null 2>&1; then
     SRC_DIR="$here"
     SRC_URL="file://$here"
@@ -528,7 +528,7 @@ resolve_source() {
   # Remote install: clone with the caller's own git credentials (ssh agent,
   # credential helper, or gh auth setup-git). The repository is private.
   command -v git >/dev/null || die "git is required"
-  CLEANUP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hermes-suite-channel.XXXXXX")"
+  CLEANUP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/burrow-channel-hermes.XXXXXX")"
   SRC_DIR="$CLEANUP_DIR/src"
   log "cloning $REPO_URL"
   git clone --quiet "$REPO_URL" "$SRC_DIR" ||
@@ -663,7 +663,7 @@ register_mcp() {
   local args
   config_unset_if_set "mcp_servers.$MCP_NAME.url"
   config_unset_if_set "mcp_servers.$MCP_NAME.headers"
-  args="$(yaml_q json "$(plugin_dir)/hermes_suite_channel/mcp_bridge.py" \
+  args="$(yaml_q json "$(plugin_dir)/hermes_burrow_channel/mcp_bridge.py" \
     --url "$MCP_URL" --token-file "$TOKEN_PATH")"
   config_set_if_changed "mcp_servers.$MCP_NAME.command" "$HPY"
   config_set_if_changed "mcp_servers.$MCP_NAME.args" "$args"

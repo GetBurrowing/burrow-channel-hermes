@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hermes-suite-channel"
-version = "0.4.1"
+name = "burrow-channel-hermes"
+version = "0.5.0"
 description = "Hermes Agent platform plugin for Burrow federation"
 readme = "README.md"
 license = "MIT"
@@ -25,7 +25,7 @@ dependencies = ["websockets>=15.0.1,<16"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "ruamel.yaml", "pyyaml"]
 
 [tool.setuptools]
-packages = ["hermes_suite_channel"]
+packages = ["hermes_burrow_channel"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

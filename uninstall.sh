@@ -25,7 +25,7 @@
 #   curl -fsSL <raw url>/uninstall.sh | bash -s -- [--hermes-home DIR]
 #
 # Safe to run twice: the second run finds nothing and changes nothing.
-# The last line printed on success is exactly `hermes-suite-channel: uninstalled`.
+# The last line printed on success is exactly `burrow-channel-hermes: uninstalled`.
 
 set -euo pipefail
 
@@ -37,11 +37,11 @@ readonly ENV_KEYS=(
 )
 readonly TOKEN_RELPATH="mcp-tokens/burrow-platform.runtime-token"
 readonly RECORD_RELDIR=".suite-channel"
-readonly RESULT_LINE="hermes-suite-channel: uninstalled"
+readonly RESULT_LINE="burrow-channel-hermes: uninstalled"
 
-log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
+log() { printf 'burrow-channel-hermes: %s\n' "$*" >&2; }
 die() {
-  printf 'hermes-suite-channel: error: %s\n' "$*" >&2
+  printf 'burrow-channel-hermes: error: %s\n' "$*" >&2
   exit 1
 }
 
@@ -99,7 +99,7 @@ hermes_venv_python() {
 
 # The interpreter that reads config.yaml (it needs Hermes's ruamel.yaml) and
 # runs the MCP bridge (standard library only). In order:
-#   1. --python PATH, when given (suite-cli passes the one it resolved);
+#   1. --python PATH, when given (burrow-cli passes the one it resolved);
 #   2. the launcher's shebang, when that is a PYTHON. A shell shebang is a
 #      wrapper, not an interpreter: every launcher hermes-agent fdec926e
 #      installs is `#!/bin/sh`, and taking /bin/sh for python is the failure
@@ -219,7 +219,7 @@ with open(os.path.join(record_dir, "record"), encoding="utf-8") as f:
     for line in f:
         key, _, value = line.strip().partition("=")
         record[key] = value
-say = lambda msg: print(f"hermes-suite-channel: {msg}")
+say = lambda msg: print(f"burrow-channel-hermes: {msg}")
 if record.get("pre_install_known") != "1":
     say("config.yaml: no pre-install record (installed over an older version); left as is")
     sys.exit(0)

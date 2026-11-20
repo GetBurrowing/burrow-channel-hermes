@@ -18,7 +18,7 @@ try:
 except ImportError as exc:  # pragma: no cover - a message, not a skip
     raise ImportError("set HERMES_AGENT_SRC to a hermes-agent checkout") from exc
 
-from hermes_suite_channel.config import ENV_FALLBACKS
+from hermes_burrow_channel.config import ENV_FALLBACKS
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -51,7 +51,7 @@ def test_hermes_loads_and_registers_the_plugin(monkeypatch, tmp_path):
     assert module.__name__ == "hermes_plugins.burrow_platform"
     assert callable(module.register)
     module.register(PluginContext(manifest, manager))
-    entry = platform_registry.get("startup_suite")
+    entry = platform_registry.get("burrow")
     assert entry is not None and entry.label == "Burrow"
     assert entry.adapter_factory.__module__.startswith("hermes_plugins.burrow_platform.")
 

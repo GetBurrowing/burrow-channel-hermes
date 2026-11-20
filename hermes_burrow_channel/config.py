@@ -227,7 +227,7 @@ def resolve_token(
 
 
 @dataclass(frozen=True)
-class SuiteConfig:
+class BurrowConfig:
     url: str
     runtime_id: str
     # repr=False: a config object printed in a log line or a traceback must
@@ -268,7 +268,7 @@ class SuiteConfig:
         *,
         default_token_file: str | os.PathLike | None = None,
         fallback_token: str | None = None,
-    ) -> SuiteConfig:
+    ) -> BurrowConfig:
         """``fallback_token`` is used only when no file or variable names one
         (the adapter passes the value it took out of os.environ at load)."""
         extra = extra or {}
