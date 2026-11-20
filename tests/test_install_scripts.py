@@ -30,9 +30,9 @@ ROOT = Path(__file__).resolve().parent.parent
 STUB_DIR = Path(__file__).resolve().parent / "stub_hermes"
 SCRIPTS = ("install.sh", "uninstall.sh", "update.sh")
 
-INSTALLED = "hermes-suite-channel: installed"
-UNINSTALLED = "hermes-suite-channel: uninstalled"
-UPDATED = "hermes-suite-channel: updated"
+INSTALLED = "burrow-channel-hermes: installed"
+UNINSTALLED = "burrow-channel-hermes: uninstalled"
+UPDATED = "burrow-channel-hermes: updated"
 
 PRE_CONFIG = "# user config, hand written\nmodel:\n  default: qwen3.5-9b  # trailing comment\n"
 PRE_ENV = 'OPENAI_API_KEY=dummy-not-a-key\nexport FOO="bar baz"\n# a comment line\n'
@@ -201,7 +201,7 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
     plugin = home / "plugins" / "burrow-platform"
     assert (plugin / "plugin.yaml").is_file()
     sha = _git(checkout, "rev-parse", "HEAD")
-    assert (plugin / "hermes_suite_channel" / "_build.py").read_text().count(
+    assert (plugin / "hermes_burrow_channel" / "_build.py").read_text().count(
         f'BUILD = "{sha}"'
     ) == 1
 
@@ -212,7 +212,7 @@ def test_install_writes_env_plugin_and_mcp(checkout, home, env, token):
     assert cfg["mcp_servers"]["burrow"] == {
         "command": sys.executable,
         "args": [
-            str(plugin / "hermes_suite_channel" / "mcp_bridge.py"),
+            str(plugin / "hermes_burrow_channel" / "mcp_bridge.py"),
             "--url",
             "https://suite.example.test/mcp",
             "--token-file",
@@ -371,7 +371,7 @@ def test_piped_script_does_not_read_the_token_from_stdin(checkout, home, env, to
 
 # A raw literal, not read from the scripts, so a default that drifts in either
 # script fails here rather than being echoed back.
-DEFAULT_REPO_URL = "https://github.com/Startup-Suite/burrow-channel-hermes.git"
+DEFAULT_REPO_URL = "https://github.com/GetBurrowing/burrow-channel-hermes.git"
 
 
 @pytest.mark.parametrize("script", ["install.sh", "update.sh"])
@@ -420,7 +420,7 @@ def test_repo_env_var_reaches_the_clone(checkout, home, env, token, tmp_path):
     assert DEFAULT_REPO_URL not in proc.stderr
     head = _git(checkout, "rev-parse", "HEAD")
     plugin = home / "plugins" / "burrow-platform"
-    assert f'BUILD = "{head}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
+    assert f'BUILD = "{head}"' in (plugin / "hermes_burrow_channel" / "_build.py").read_text()
 
 
 @pytest.mark.parametrize("form", ["--repo", "--repo="])
@@ -499,7 +499,7 @@ def test_update_resolves_the_env_var_and_passes_it_on(checkout, home, env, token
     assert proc.returncode == 0, proc.stderr
     assert last_line(proc) == UPDATED
     plugin = home / "plugins" / "burrow-platform"
-    assert f'BUILD = "{new_sha}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
+    assert f'BUILD = "{new_sha}"' in (plugin / "hermes_burrow_channel" / "_build.py").read_text()
 
 
 def test_update_repo_flag_beats_the_env_var(checkout, home, env, token, tmp_path):
@@ -653,7 +653,7 @@ def test_copy_fallback_is_opt_in(checkout, home, env, token):
     assert ok.returncode == 0, ok.stderr
     assert last_line(ok) == INSTALLED
     sha = _git(checkout, "rev-parse", "HEAD")
-    build = home / "plugins" / "burrow-platform" / "hermes_suite_channel" / "_build.py"
+    build = home / "plugins" / "burrow-platform" / "hermes_burrow_channel" / "_build.py"
     assert f'BUILD = "{sha}"' in build.read_text()
 
     un = run(checkout / "uninstall.sh", "--hermes-home", str(home), env=env)
@@ -712,7 +712,7 @@ def test_update_moves_the_plugin_and_keeps_the_config(checkout, home, env, token
     assert last_line(proc) == UPDATED
     plugin = home / "plugins" / "burrow-platform"
     assert (plugin / "NEWFILE").is_file()
-    assert f'BUILD = "{new_sha}"' in (plugin / "hermes_suite_channel" / "_build.py").read_text()
+    assert f'BUILD = "{new_sha}"' in (plugin / "hermes_burrow_channel" / "_build.py").read_text()
     assert (home / ".env").read_bytes() == env_before
     assert (home / "config.yaml").read_bytes() == cfg_before
 
@@ -760,7 +760,7 @@ def _plugin_verbs(env) -> list[str]:
 
 
 def _build(home: Path) -> str:
-    f = home / "plugins" / "burrow-platform" / "hermes_suite_channel" / "_build.py"
+    f = home / "plugins" / "burrow-platform" / "hermes_burrow_channel" / "_build.py"
     return f.read_text().split('BUILD = "')[1].split('"')[0]
 
 
@@ -1327,9 +1327,9 @@ def test_install_over_a_v020_env_rewrites_in_place_and_adds_burrow(checkout, hom
         "BURROW_RUNTIME_ID=rt-01a0d6c5\n"
         f"BURROW_RUNTIME_TOKEN_FILE={token_path(home)}\n"
     )
-    from hermes_suite_channel.config import SuiteConfig
+    from hermes_burrow_channel.config import BurrowConfig
 
-    cfg = SuiteConfig.from_extra({}, env=parse_env(text))
+    cfg = BurrowConfig.from_extra({}, env=parse_env(text))
     assert (cfg.url, cfg.runtime_id, cfg.token) == (
         "wss://suite.example.test/runtime/ws",
         "rt-01a0d6c5",
@@ -1430,7 +1430,7 @@ async def test_v020_host_upgraded_by_update_sh_connects(checkout, home, env, tok
         module = manager._load_directory_module(manifest)
         assert Path(module.__file__).resolve().parent == plugin.resolve()
         module.register(PluginContext(manifest, manager))
-        entry = platform_registry.get("startup_suite")
+        entry = platform_registry.get("burrow")
         assert entry.check_fn() is True
         assert entry.allowed_users_env == "BURROW_ALLOWED_USERS"  # neither set: deny-all
         seed = entry.env_enablement_fn()

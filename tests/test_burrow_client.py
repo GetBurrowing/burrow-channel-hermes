@@ -6,13 +6,13 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from conftest import make_config
 
-from hermes_suite_channel import __version__
-from hermes_suite_channel.suite_client import (
+from hermes_burrow_channel import __version__
+from hermes_burrow_channel.burrow_client import (
     AttachmentTooLarge,
+    BurrowClient,
     NotConnected,
     PushRefused,
     PushTimeout,
-    SuiteClient,
     attention_identity,
     socket_url,
 )
@@ -20,7 +20,7 @@ from hermes_suite_channel.suite_client import (
 
 async def started(server, **kwargs):
     handlers = {k: kwargs.pop(k) for k in list(kwargs) if k.startswith("on_")}
-    client = SuiteClient(make_config(server.url, **kwargs), **handlers)
+    client = BurrowClient(make_config(server.url, **kwargs), **handlers)
     await client.start()
     await client.wait_joined(3)
     return client
@@ -123,7 +123,7 @@ async def test_reply_raises_on_timeout(server):
 
 
 async def test_push_before_join_raises_not_connected(server):
-    client = SuiteClient(make_config(server.url))
+    client = BurrowClient(make_config(server.url))
     with pytest.raises(NotConnected) as info:
         await client.send_reply("sp-1", "hi")
     assert info.value.recoverable is True
@@ -237,7 +237,7 @@ async def test_phx_error_on_channel_forces_reconnect(server):
 async def test_refused_join_retries_with_backoff(server):
     server.refuse_joins = 2
     disconnects = []
-    client = SuiteClient(make_config(server.url), on_disconnect=lambda: disconnects.append(1))
+    client = BurrowClient(make_config(server.url), on_disconnect=lambda: disconnects.append(1))
     await client.start()
     try:
         await client.wait_joined(3)
@@ -308,7 +308,7 @@ async def test_typing_and_chunk_refusals_are_recorded_then_cleared(server):
 
 def test_backoff_doubles_to_the_cap_and_jitter_never_exceeds_it():
     cfg = make_config("ws://x", reconnect_min_ms=1000, reconnect_max_ms=30000)
-    client = SuiteClient(cfg)
+    client = BurrowClient(cfg)
     assert [client.backoff_delay_ms(n) for n in range(7)] == [
         1000,
         2000,
@@ -318,13 +318,13 @@ def test_backoff_doubles_to_the_cap_and_jitter_never_exceeds_it():
         30000,
         30000,
     ]
-    jittered = SuiteClient(
+    jittered = BurrowClient(
         make_config("ws://x", reconnect_min_ms=1000, reconnect_max_ms=30000, reconnect_jitter=0.5),
         rng=lambda: 0.5,
     )
     assert jittered.backoff_delay_ms(10) == 22500
     for r in (0.0, 0.5, 0.999):
-        capped = SuiteClient(make_config("ws://x", reconnect_jitter=1.0), rng=lambda r=r: r)
+        capped = BurrowClient(make_config("ws://x", reconnect_jitter=1.0), rng=lambda r=r: r)
         assert 1 <= capped.backoff_delay_ms(9) <= 100
 
 

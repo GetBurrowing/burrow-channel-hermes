@@ -1,6 +1,6 @@
 """Phoenix runtime-socket client for Burrow federation (asyncio).
 
-A port of claude-code-suite-channel ``src/suite-client.ts`` to Python, using
+A port of burrow-channel-claude-code ``src/suite-client.ts`` to Python, using
 the ``websockets`` library directly instead of the phoenix JS client.
 
 Wire contract (core, origin/main):
@@ -17,9 +17,9 @@ Wire contract (core, origin/main):
 - outbound, acked: ``reply``, ``reply_with_media``; fire-and-forget with the
   refusal recorded: ``typing``, ``reply_chunk``.
 
-Token hygiene: the token exists in exactly two places, ``SuiteConfig.token``
+Token hygiene: the token exists in exactly two places, ``BurrowConfig.token``
 (``repr=False``) and the query string built by ``socket_url()``. Every log
-record goes through ``RedactingLogger`` (hermes_suite_channel/redact.py),
+record goes through ``RedactingLogger`` (hermes_burrow_channel/redact.py),
 including the websockets library's own DEBUG output, which logs the request
 target and therefore the query string. No exception raised by this module
 formats the URL or the config.
@@ -43,7 +43,7 @@ from urllib.parse import urlencode
 
 from . import __version__
 from ._build import BUILD
-from .config import SuiteConfig
+from .config import BurrowConfig
 from .redact import RedactingLogger
 
 PRODUCT = "hermes_channel"
@@ -84,7 +84,7 @@ def client_info() -> dict[str, Any]:
     }
 
 
-def socket_url(config: SuiteConfig) -> str:
+def socket_url(config: BurrowConfig) -> str:
     """The dial URL. Carries the token; never log it except through redact()."""
     base = config.url.rstrip("/")
     if base.startswith("https://"):
@@ -136,7 +136,7 @@ def attention_identity(payload: dict[str, Any]) -> str:
     )
 
 
-class SuiteError(Exception):
+class BurrowError(Exception):
     """Base for push failures. ``recoverable`` says whether a retry may succeed."""
 
     recoverable = False
@@ -148,13 +148,13 @@ class SuiteError(Exception):
             self.recoverable = recoverable
 
 
-class NotConnected(SuiteError):
+class NotConnected(BurrowError):
     """The channel is not joined; nothing was sent."""
 
     recoverable = True
 
 
-class PushRefused(SuiteError):
+class PushRefused(BurrowError):
     """Burrow answered the push with an error reply."""
 
     def __init__(self, message: str, *, recoverable: bool, response: dict[str, Any]):
@@ -162,26 +162,27 @@ class PushRefused(SuiteError):
         self.response = response
 
 
-class PushTimeout(SuiteError):
+class PushTimeout(BurrowError):
     """No ack within the push timeout. The message MAY have landed, so a blind
     retry can duplicate it: not recoverable, outcome unknown."""
 
     outcome_unknown = True
 
 
-class ConnectionLost(SuiteError):
+class ConnectionLost(BurrowError):
     """The socket dropped with the push in flight. Outcome unknown."""
 
     outcome_unknown = True
 
 
-class AttachmentTooLarge(SuiteError):
+class AttachmentTooLarge(BurrowError):
     """Rejected locally against core's attachment caps; nothing was sent."""
 
 
-class InvalidSuiteURL(SuiteError):
-    """BURROW_URL (or SUITE_URL) cannot be dialled as a websocket URI. Terminal: retrying the
-    same URL cannot succeed, so the supervisor stops instead of looping."""
+class InvalidBurrowURL(BurrowError):
+    """BURROW_URL (or the legacy SUITE_URL) cannot be dialled as a websocket URI.
+    Terminal: retrying the same URL cannot succeed, so the supervisor stops
+    instead of looping."""
 
 
 class _SessionEnded(Exception):
@@ -191,10 +192,10 @@ class _SessionEnded(Exception):
 Handler = Callable[..., Any] | None
 
 
-class SuiteClient:
+class BurrowClient:
     def __init__(
         self,
-        config: SuiteConfig,
+        config: BurrowConfig,
         *,
         on_attention: Handler = None,
         on_joined: Handler = None,
@@ -210,7 +211,7 @@ class SuiteClient:
         secrets = (config.token,)
         self._log = RedactingLogger(logger or logging.getLogger(__name__), secrets)
         self._ws_log = RedactingLogger(
-            logging.getLogger("hermes_suite_channel.websockets"), secrets
+            logging.getLogger("hermes_burrow_channel.websockets"), secrets
         )
         self._handlers = {
             "attention": on_attention,
@@ -236,7 +237,7 @@ class SuiteClient:
         self._chunk_refusals: dict[str, str] = {}
         self._bg: set[asyncio.Task] = set()
         self.sessions = 0
-        self.fatal_error: SuiteError | None = None
+        self.fatal_error: BurrowError | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ class SuiteClient:
         if self._task and not self._task.done():
             return
         self._stopped = False
-        self._task = asyncio.create_task(self._supervise(), name="hermes-suite-client")
+        self._task = asyncio.create_task(self._supervise(), name="burrow-client")
 
     async def stop(self) -> None:
         self._stopped = True
@@ -285,7 +286,7 @@ class SuiteClient:
                 await self._session()
             except asyncio.CancelledError:
                 raise
-            except InvalidSuiteURL as exc:
+            except InvalidBurrowURL as exc:
                 self.fatal_error = exc
                 self._log.error("%s; not reconnecting", exc)
                 self._end_session()
@@ -335,7 +336,7 @@ class SuiteClient:
         ``connect`` uses, so only a parse failure is classified as terminal;
         a network or handshake error during the dial still reconnects.
 
-        A malformed URL is re-raised as ``InvalidSuiteURL`` carrying no part
+        A malformed URL is re-raised as ``InvalidBurrowURL`` carrying no part
         of the URL: ``websockets.exceptions.InvalidURI`` formats the WHOLE
         uri, query string and token included, into its message. The redacted
         error is raised OUTSIDE the ``except`` block so it has no
@@ -353,7 +354,7 @@ class SuiteClient:
             # does not carry the URL today; classified the same way anyway.
             problem = "could not be parsed"
         if problem is not None:
-            raise InvalidSuiteURL(
+            raise InvalidBurrowURL(
                 f"BURROW_URL/SUITE_URL {problem} (value withheld: the dial URL carries the token)"
             )
         return await connect(
@@ -561,7 +562,7 @@ class SuiteClient:
                 f"timed out after {timeout_ms}ms waiting for Burrow to ack the {event} "
                 f"to space {space_id}"
             ) from None
-        except SuiteError:
+        except BurrowError:
             raise
         except Exception as exc:  # the socket died under the send
             raise ConnectionLost(
@@ -643,7 +644,7 @@ class SuiteClient:
             except PushRefused as exc:
                 refusals[space_id] = str(exc)
                 self._log.info("%s for space %s refused: %s", event, space_id, exc)
-            except SuiteError as exc:
+            except BurrowError as exc:
                 self._log.debug("%s for space %s not acked: %s", event, space_id, exc)
 
         self._spawn(run(), label=event)

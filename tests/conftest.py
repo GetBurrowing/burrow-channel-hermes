@@ -4,7 +4,7 @@ import sys
 import pytest
 from fake_phoenix import FakePhoenix
 
-from hermes_suite_channel.config import SuiteConfig
+from hermes_burrow_channel.config import BurrowConfig
 
 # The adapter tests import the REAL hermes-agent gateway (no stub of its API).
 # HERMES_AGENT_SRC points at a hermes-agent checkout; CI clones the commit
@@ -28,8 +28,8 @@ FAST = {
 }
 
 
-def make_config(url: str, token: str = "tok-plain-01a0d6c5", **overrides) -> SuiteConfig:
-    return SuiteConfig(url=url, runtime_id="rt-01a0d6c5", token=token, **{**FAST, **overrides})
+def make_config(url: str, token: str = "tok-plain-01a0d6c5", **overrides) -> BurrowConfig:
+    return BurrowConfig(url=url, runtime_id="rt-01a0d6c5", token=token, **{**FAST, **overrides})
 
 
 @pytest.fixture

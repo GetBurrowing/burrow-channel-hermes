@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.5.0
+
+The last identifiers that still carried the old product name, renamed, the gateway platform key included, with a migration so an existing home keeps its sessions, toolsets and home channel. The v0.4.0 entry below explains why the platform key was left alone then; this release renames it anyway and moves the state keyed on it.
+
+| What | Was | Now |
+| --- | --- | --- |
+| Gateway platform key (`PLATFORM_NAME`): session keys, `platform_toolsets.<key>`, `platforms.<key>`, the model-visible `Source:` / `Platform:` / "No home channel is set for ..." lines | `startup_suite` (shown as `Startup_Suite`) | `burrow` (shown as `Burrow`) |
+| Untrusted envelope tag (`envelope.TAG`) | `<suite-untrusted ...>` | `<burrow-untrusted ...>`; the old name stays in `LEGACY_TAGS` and is neutralised exactly like the new one |
+| Platform hint | names `<suite-untrusted>` | names `<burrow-untrusted>` |
+| `MessageEvent.metadata` keys | `suite_<id>`, `suite_trusted_author` | `burrow_<id>`, `burrow_trusted_author` |
+| Chat id of a dispatch that names no space (`NO_SPACE_CHAT`) | `suite:no-space` | `burrow:no-space` |
+| Python package, distribution | `hermes_suite_channel`, `hermes-suite-channel` | `hermes_burrow_channel`, `burrow-channel-hermes` |
+| Classes / modules | `SuiteAdapter`, `SuiteClient`, `SuiteConfig`, `SuiteError`, `suite_client.py` | `BurrowAdapter`, `BurrowClient`, `BurrowConfig`, `BurrowError`, `burrow_client.py` |
+| Installer result and log lines | `hermes-suite-channel: installed` / `updated` / `uninstalled` | `burrow-channel-hermes: ...` |
+| MCP bridge stderr prefix | `suite-mcp-bridge:` | `burrow-mcp-bridge:` |
+| install.sh / update.sh default repository | `github.com/Startup-Suite/burrow-channel-hermes` | `github.com/GetBurrowing/burrow-channel-hermes` |
+
+- **Migration: `hermes_burrow_channel/platform_rename.py`.** Moves `state.db` (`gateway_routing`, `sessions`, `delivery_obligations`, `gateway_hygiene_state`, `conversation_generations`, `async_delegations`) in one transaction, then the `sessions/sessions.json` mirror and `cron/jobs.json` targets. Only with the gateway stopped (Hermes's own `is_gateway_running`, scoped to the home); refuses a collision; idempotent. Without it every chat silently starts a fresh session, and the gateway deletes the old routing rows at its next save. Tested against Hermes's real `SessionStore` (tests/test_platform_rename.py), with a control that shows the orphaning without the move.
+- **burrow-cli moves an existing home** on `burrow hermes`'s start path (burrow-cli 0.20.0, which pins this release): `platform_toolsets.startup_suite`, `platforms.startup_suite` (home channel included) and a `STARTUP_SUITE_HOME_CHANNEL` `.env` line through Hermes's own config writer, then this module. Never on an attach to a running agent. By hand: README "Platform rename". This installer does NOT migrate, and run over an unmigrated home it leaves the old state orphaned, as v0.4.0's did for its names.
+- A continuing session keeps its stored system prompt, whose `Platform:` line still says `startup_suite`; Hermes adds its own one-shot surface-switch note naming `burrow` with the new hint on the first turn after the move. `/new` gives a clean prompt. Restart the gateway to load this version.
+- Deliberately unchanged: `suite-system`, the `user_id` of a system event (operators list it by name in `BURROW_ALLOWED_USERS`, so renaming it would deny every task dispatch on such a host; the model sees `Burrow`, not this id); the deprecated `SUITE_<X>` env spellings, still read after `BURROW_<X>` and still written by install.sh beside the new ones for a downgrade; `HERMES_SUITE_CHANNEL_REPO` (read after `HERMES_BURROW_CHANNEL_REPO`); the install record directory `$HERMES_HOME/.suite-channel/`; `client_info.product` `hermes_channel`; the names of Burrow core's own tools and APIs, which this plugin relays but does not own. Comments and docs now call each of these a legacy name.
+- LICENSE: the copyright holder is now Burrow (`Copyright (c) 2026 Burrow`). The temporary name guard (tests/test_product_name.py) no longer allowlists the old copyright line, so it fails if that line comes back.
+- README examples use `burrow.example.com` and `~/.burrow-token`.
+
 ## v0.4.1
 
 - The MCP bridge (`hermes_suite_channel/mcp_bridge.py`) sends `User-Agent: burrow-channel-hermes/<version>` on every request. It used urllib's default `Python-urllib/3.x`, which Cloudflare in front of some Burrow hosts refuses with `403 error code: 1010`, so the agent's Burrow tools failed on those hosts.

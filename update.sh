@@ -9,20 +9,20 @@
 #   ./update.sh [--hermes-home DIR] [--hermes BIN]
 #   curl -fsSL <raw url>/update.sh | bash -s -- [--ref SHA] [--repo URL]
 #
-# The last line printed on success is exactly `hermes-suite-channel: updated`.
+# The last line printed on success is exactly `burrow-channel-hermes: updated`.
 
 set -euo pipefail
 
 readonly PLUGIN_NAME="burrow-platform"
 # Clone source when not run from a checkout. Precedence: --repo, then the
 # HERMES_BURROW_CHANNEL_REPO environment variable, then the deprecated
-# HERMES_SUITE_CHANNEL_REPO, then this default.
-readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/Startup-Suite/burrow-channel-hermes.git}}"
-readonly RESULT_LINE="hermes-suite-channel: updated"
+# HERMES_SUITE_CHANNEL_REPO (legacy name), then this default.
+readonly DEFAULT_REPO="${HERMES_BURROW_CHANNEL_REPO:-${HERMES_SUITE_CHANNEL_REPO:-https://github.com/GetBurrowing/burrow-channel-hermes.git}}"
+readonly RESULT_LINE="burrow-channel-hermes: updated"
 
-log() { printf 'hermes-suite-channel: %s\n' "$*" >&2; }
+log() { printf 'burrow-channel-hermes: %s\n' "$*" >&2; }
 die() {
-  printf 'hermes-suite-channel: error: %s\n' "$*" >&2
+  printf 'burrow-channel-hermes: error: %s\n' "$*" >&2
   exit 1
 }
 
@@ -78,18 +78,18 @@ trap '[ -z "$CLEANUP_DIR" ] || rm -rf "$CLEANUP_DIR"' EXIT
 if [ -n "$HERE" ] && [ -f "$HERE/install.sh" ] && [ -f "$HERE/plugin.yaml" ]; then
   INSTALLER="$HERE/install.sh"
 else
-  CLEANUP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hermes-suite-channel.XXXXXX")"
+  CLEANUP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/burrow-channel-hermes.XXXXXX")"
   git clone --quiet "$REPO_URL" "$CLEANUP_DIR/src" ||
     die "could not clone $REPO_URL (private repository: authenticate git first)"
   INSTALLER="$CLEANUP_DIR/src/install.sh"
 fi
 
-BEFORE="$(sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$PLUGIN_DIR/hermes_suite_channel/_build.py" 2>/dev/null || true)"
+BEFORE="$(sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$PLUGIN_DIR/hermes_burrow_channel/_build.py" 2>/dev/null || true)"
 # The repository is already resolved into --repo, so the child does not need
 # the old override, and without it does not print the deprecation line twice.
 env -u HERMES_SUITE_CHANNEL_REPO \
   bash "$INSTALLER" --plugin-only --hermes-home "$HERMES_HOME" ${PASS[@]+"${PASS[@]}"} </dev/null
-AFTER="$(sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$PLUGIN_DIR/hermes_suite_channel/_build.py")"
+AFTER="$(sed -n 's/^BUILD = "\(.*\)"$/\1/p' "$PLUGIN_DIR/hermes_burrow_channel/_build.py")"
 
 if [ "$BEFORE" = "$AFTER" ]; then
   log "already at $AFTER"

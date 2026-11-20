@@ -1,4 +1,4 @@
-"""SuiteAdapter against the REAL hermes-agent gateway and the fake Phoenix server.
+"""BurrowAdapter against the REAL hermes-agent gateway and the fake Phoenix server.
 
 ``handle_message`` is stubbed (it spawns a Hermes agent turn); everything else
 is Hermes's own code: BasePlatformAdapter, SendResult, MessageEvent,
@@ -22,13 +22,13 @@ except ImportError as exc:  # pragma: no cover - a message, not a skip
         "hermes-agent checkout (see tests/conftest.py)"
     ) from exc
 
-from hermes_suite_channel import adapter as adapter_mod
-from hermes_suite_channel import config as config_mod
-from hermes_suite_channel.adapter import (
+from hermes_burrow_channel import adapter as adapter_mod
+from hermes_burrow_channel import config as config_mod
+from hermes_burrow_channel.adapter import (
     NO_SPACE_CHAT,
     PLATFORM_NAME,
     SYSTEM_USER,
-    SuiteAdapter,
+    BurrowAdapter,
     register,
 )
 
@@ -69,8 +69,8 @@ def hermes_env(monkeypatch, tmp_path):
     return ctx
 
 
-def make_adapter(url: str, **extra) -> SuiteAdapter:
-    return SuiteAdapter(PlatformConfig(enabled=True, extra={"url": url, **FAST, **extra}))
+def make_adapter(url: str, **extra) -> BurrowAdapter:
+    return BurrowAdapter(PlatformConfig(enabled=True, extra={"url": url, **FAST, **extra}))
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ async def settle():
 
 def test_register_uses_real_platform_entry_kwargs(hermes_env):
     kw = hermes_env.kwargs
-    assert kw["name"] == "startup_suite"
+    assert kw["name"] == "burrow"
     # The spelling the host sets; the new name where it sets neither.
     assert kw["required_env"] == ["BURROW_URL", "SUITE_RUNTIME_ID", "BURROW_RUNTIME_TOKEN_FILE"]
     assert kw["allowed_users_env"] == "BURROW_ALLOWED_USERS"
@@ -137,8 +137,8 @@ def test_env_enablement_never_seeds_the_token(monkeypatch):
     assert seed["reconnect_min_ms"] == 1500
     assert TOKEN not in repr(seed)
     cfg = PlatformConfig(enabled=True, extra=seed)
-    adapter = SuiteAdapter(cfg)
-    assert adapter.suite_config.token == TOKEN  # read from the secret store
+    adapter = BurrowAdapter(cfg)
+    assert adapter.burrow_config.token == TOKEN  # read from the secret store
     assert TOKEN not in repr(cfg.to_dict())  # and never lands in the serialised config
 
 
@@ -196,7 +196,7 @@ async def test_token_file_named_by_env_is_used_and_never_enters_the_env(
     monkeypatch.setenv("SUITE_RUNTIME_TOKEN_FILE", str(tf))
     monkeypatch.setenv("SUITE_URL", server.url)
     adapter = make_adapter(server.url)
-    assert adapter.suite_config.token == file_token
+    assert adapter.burrow_config.token == file_token
     assert await adapter.connect() is True
     try:
         assert any(f"token={file_token}" in path for path in server.request_paths)
@@ -207,12 +207,12 @@ async def test_token_file_named_by_env_is_used_and_never_enters_the_env(
 
 def test_default_token_file_under_hermes_home(monkeypatch, tmp_path):
     monkeypatch.setenv("SUITE_URL", "wss://suite.example/runtime/ws")
-    from hermes_suite_channel.config import TOKEN_FILE_RELPATH
+    from hermes_burrow_channel.config import TOKEN_FILE_RELPATH
 
     monkeypatch.setattr(adapter_mod, "_ENV_TOKEN", None)
     _token_file(tmp_path / "hermes" / TOKEN_FILE_RELPATH, "tok-default-01a0d6c5")
     adapter = make_adapter("wss://suite.example/runtime/ws")
-    assert adapter.suite_config.token == "tok-default-01a0d6c5"
+    assert adapter.burrow_config.token == "tok-default-01a0d6c5"
     assert adapter_mod.check_requirements() is True
 
 
@@ -222,7 +222,7 @@ def test_group_readable_token_file_is_refused_without_its_content(monkeypatch, t
     tf = _token_file(tmp_path / "tok", "tok-loose-01a0d6c5", mode=0o640)
     monkeypatch.setenv("SUITE_RUNTIME_TOKEN_FILE", str(tf))
     adapter = make_adapter("wss://suite.example/runtime/ws")
-    assert adapter.suite_config is None
+    assert adapter.burrow_config is None
     assert "chmod 600" in adapter._config_error
     assert "tok-loose-01a0d6c5" not in adapter._config_error
     assert adapter_mod.check_requirements() is False
@@ -233,7 +233,7 @@ def test_env_token_is_not_borrowed_inside_a_secondary_profile_scope(monkeypatch)
     multiplexed secondary profile must never fall back to it."""
     monkeypatch.setattr(adapter_mod, "profile_scoped", lambda: True)
     adapter = make_adapter("wss://suite.example/runtime/ws")
-    assert adapter.suite_config is None and "token" in adapter._config_error
+    assert adapter.burrow_config is None and "token" in adapter._config_error
 
 
 # ── inbound ───────────────────────────────────────────────────────────────
@@ -260,7 +260,7 @@ async def test_attention_becomes_one_message_event(live, server):
     assert event.user_name == "Ryan"
     assert event.raw_message == payload
     assert event.allow_gateway_control is False
-    assert event.metadata["suite_task_id"] == "t-01a0d6c5"
+    assert event.metadata["burrow_task_id"] == "t-01a0d6c5"
 
 
 async def test_system_event_with_no_message_yields_the_prompt(live, server):
@@ -470,17 +470,17 @@ async def test_failed_finalize_leaves_the_stream_open(live, server):
 
 # ── in_reply_to_message_id (task 01a0d8de) ────────────────────────────────
 
-SUITE_MSG = "01a0d8de-aaaa-7001-9246-3f8fe86630f6"
+MSG_ID = "01a0d8de-aaaa-7001-9246-3f8fe86630f6"
 
 
 async def test_send_with_a_suite_reply_to_forwards_in_reply_to(live, server):
     server.replies["reply"] = ("ok", {"message_id": "msg-9", "space_id": "sp-1"})
-    assert (await live.send("sp-1", "hi", reply_to=SUITE_MSG)).success
+    assert (await live.send("sp-1", "hi", reply_to=MSG_ID)).success
     ((_, frame),) = server.events("reply")
-    assert frame[4] == {"space_id": "sp-1", "content": "hi", "in_reply_to_message_id": SUITE_MSG}
+    assert frame[4] == {"space_id": "sp-1", "content": "hi", "in_reply_to_message_id": MSG_ID}
 
 
-@pytest.mark.parametrize("reply_to", [None, "", "m-1", "chunk:" + SUITE_MSG, SUITE_MSG + "x", 7])
+@pytest.mark.parametrize("reply_to", [None, "", "m-1", "chunk:" + MSG_ID, MSG_ID + "x", 7])
 async def test_non_suite_reply_to_is_not_forwarded(live, server, reply_to):
     # The positive control for the case above: a send that always wrote the key
     # (or wrote whatever reply_to held) fails here.
@@ -490,12 +490,16 @@ async def test_non_suite_reply_to_is_not_forwarded(live, server, reply_to):
 
 
 async def test_stream_finalise_reply_carries_the_reply_to_from_the_opening_send(live, server):
-    opened = await live.send("sp-1", "draft", reply_to=SUITE_MSG, metadata={"expect_edits": True})
+    opened = await live.send("sp-1", "draft", reply_to=MSG_ID, metadata={"expect_edits": True})
     assert (await live.edit_message("sp-1", opened.message_id, "more")).success
     assert (await live.edit_message("sp-1", opened.message_id, "final", finalize=True)).success
     await server.wait_for(lambda: any(f[4]["done"] for _, f in server.events("reply_chunk")))
     ((_, reply),) = server.events("reply")
-    assert reply[4] == {"space_id": "sp-1", "content": "final", "in_reply_to_message_id": SUITE_MSG}
+    assert reply[4] == {
+        "space_id": "sp-1",
+        "content": "final",
+        "in_reply_to_message_id": MSG_ID,
+    }
     # The ephemeral chunk pushes are unchanged: no annotation.
     for _, f in server.events("reply_chunk"):
         assert "in_reply_to_message_id" not in f[4]
@@ -508,7 +512,7 @@ async def test_real_stream_consumer_anchors_the_persisted_reply(live, server):
         live,
         "sp-1",
         StreamConsumerConfig(edit_interval=0.01, buffer_threshold=1),
-        initial_reply_to_id=SUITE_MSG,
+        initial_reply_to_id=MSG_ID,
     )
     task = asyncio.create_task(consumer.run())
     for piece in ["Hello there, ", "this answer ", "is streamed."]:
@@ -519,7 +523,7 @@ async def test_real_stream_consumer_anchors_the_persisted_reply(live, server):
     await asyncio.wait_for(task, 5)
     await server.wait_for(lambda: any(f[4]["done"] for _, f in server.events("reply_chunk")))
     replies = [f[4] for _, f in server.events("reply")]
-    assert replies == [{"space_id": "sp-1", "content": final, "in_reply_to_message_id": SUITE_MSG}]
+    assert replies == [{"space_id": "sp-1", "content": final, "in_reply_to_message_id": MSG_ID}]
 
 
 # ── token hygiene at the adapter boundary ─────────────────────────────────
@@ -549,7 +553,7 @@ async def test_malformed_suite_url_fails_connect_without_the_token(monkeypatch, 
 
 def _authorized(user_id: str) -> bool:
     """The REAL gateway authorization verdict for a Burrow DM from user_id,
-    against whatever startup_suite entry is registered now."""
+    against whatever burrow entry is registered now."""
     from gateway.authz_mixin import GatewayAuthorizationMixin
     from gateway.config import Platform
     from gateway.session import SessionSource
@@ -722,7 +726,7 @@ def test_burrow_token_file_wins(monkeypatch, tmp_path):
     monkeypatch.setenv("SUITE_RUNTIME_TOKEN_FILE", str(old))
     monkeypatch.setenv("BURROW_RUNTIME_TOKEN_FILE", str(new))
     adapter = make_adapter("wss://suite.example/runtime/ws")
-    assert adapter.suite_config.token == "tok-newfile-01a14b9f"
+    assert adapter.burrow_config.token == "tok-newfile-01a14b9f"
 
 
 def test_agent_id_reads_burrow_first(monkeypatch):
@@ -742,7 +746,7 @@ async def test_both_set_differently_dials_and_joins_the_burrow_values(server, mo
     monkeypatch.setenv("BURROW_RUNTIME_ID", "rt-B")
     monkeypatch.setenv("SUITE_RUNTIME_TOKEN", "tok-A-01a14b9f")
     monkeypatch.setenv("BURROW_RUNTIME_TOKEN", "tok-B-01a14b9f")
-    adapter = SuiteAdapter(PlatformConfig(enabled=True, extra={**FAST}))
+    adapter = BurrowAdapter(PlatformConfig(enabled=True, extra={**FAST}))
     assert await adapter.connect() is True
     try:
         assert server.topic == "runtime:rt-B"
@@ -756,7 +760,7 @@ async def test_suite_only_host_connects_and_warns_once_per_name(server, monkeypa
     caplog.set_level(logging.WARNING)
     monkeypatch.setenv("SUITE_URL", server.url)
     for _ in range(3):
-        adapter = SuiteAdapter(PlatformConfig(enabled=True, extra={**FAST}))
+        adapter = BurrowAdapter(PlatformConfig(enabled=True, extra={**FAST}))
         assert await adapter.connect() is True
         await adapter.disconnect()
         adapter_mod.check_requirements()
@@ -778,7 +782,7 @@ async def test_burrow_only_host_connects_without_a_warning(server, monkeypatch, 
     monkeypatch.setenv("BURROW_RUNTIME_TOKEN", TOKEN)
     ctx = FakeCtx()
     register(ctx)
-    adapter = SuiteAdapter(PlatformConfig(enabled=True, extra={**FAST}))
+    adapter = BurrowAdapter(PlatformConfig(enabled=True, extra={**FAST}))
     assert await adapter.connect() is True
     await adapter.disconnect()
     assert not [r for r in caplog.records if "is deprecated" in r.getMessage()]
